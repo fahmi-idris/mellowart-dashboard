@@ -16,6 +16,7 @@ export const TEMPLATE_KEYS = [
   "confirmation",
   "rejection",
   "waitlist",
+  "withdrawn",
 ] as const;
 
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
@@ -37,13 +38,18 @@ export const TEMPLATE_META: Record<
   },
   rejection: {
     label: "Rejection",
-    description: "Sent when a submission is marked rejected. Optional reason.",
-    trigger: "On status → rejected",
+    description: "Sent manually for a rejected submission. Optional reason.",
+    trigger: "Manual action · Rejected",
   },
   waitlist: {
     label: "Waitlist",
-    description: "Sent when a submission is waitlisted. Optional reason.",
-    trigger: "On status → waitlisted",
+    description: "Sent manually for a waitlisted submission. Optional reason.",
+    trigger: "Manual action · Waitlisted",
+  },
+  withdrawn: {
+    label: "Withdrawn",
+    description: "Sent manually after an application is marked withdrawn.",
+    trigger: "Manual action · Withdrawn",
   },
 };
 
@@ -53,6 +59,7 @@ export const TEMPLATE_META: Record<
 
 export type BlockType =
   | "hero"
+  | "image"
   | "heading"
   | "paragraph"
   | "list"
@@ -79,6 +86,13 @@ export interface HeroBlock extends BlockBase {
   heading: string;
   subtext?: string;
   showReference?: boolean;
+}
+export interface ImageBlock extends BlockBase {
+  type: "image";
+  url: string;
+  alt: string;
+  linkUrl?: string;
+  width: "full" | "medium" | "small";
 }
 export interface HeadingBlock extends BlockBase {
   type: "heading";
@@ -117,6 +131,7 @@ export interface SpacerBlock extends BlockBase {
 
 export type EmailBlock =
   | HeroBlock
+  | ImageBlock
   | HeadingBlock
   | ParagraphBlock
   | ListBlock
@@ -126,8 +141,28 @@ export type EmailBlock =
   | DividerBlock
   | SpacerBlock;
 
+export type BlockDropPosition = "before" | "after";
+
+/** Reorder one block relative to another without mutating the working copy. */
+export function reorderEmailBlocks(
+  blocks: EmailBlock[],
+  sourceId: string,
+  targetId: string,
+  position: BlockDropPosition,
+): EmailBlock[] {
+  if (sourceId === targetId) return blocks;
+  const source = blocks.find((block) => block.id === sourceId);
+  if (!source || !blocks.some((block) => block.id === targetId)) return blocks;
+
+  const next = blocks.filter((block) => block.id !== sourceId);
+  const targetIndex = next.findIndex((block) => block.id === targetId);
+  next.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, source);
+  return next;
+}
+
 export const BLOCK_LABELS: Record<BlockType, string> = {
   hero: "Hero banner",
+  image: "Image",
   heading: "Heading",
   paragraph: "Paragraph",
   list: "List",
@@ -147,6 +182,8 @@ export function newBlock(type: BlockType): EmailBlock {
   switch (type) {
     case "hero":
       return { id, type, tag: "", heading: "Heading", subtext: "", showReference: false };
+    case "image":
+      return { id, type, url: "", alt: "", linkUrl: "", width: "full" };
     case "heading":
       return { id, type, text: "Heading" };
     case "paragraph":
@@ -240,7 +277,11 @@ export const ALL_MERGE_TAGS: MergeTag[] = [
   { tag: "bankAccountName", label: "Bank account name", sample: "Mellow Art Market" },
   { tag: "bankBsb", label: "Bank BSB", sample: "063-000" },
   { tag: "bankAccountNumber", label: "Bank account number", sample: "1234 5678" },
-  { tag: "confirmationFormUrl", label: "Confirmation form URL", sample: "https://forms.example.com/paid" },
+  {
+    tag: "confirmationFormUrl",
+    label: "Confirmation form URL",
+    sample: "https://forms.example.com/paid",
+  },
   { tag: "contactEmail", label: "Contact email", sample: "mellowartmarket@gmail.com" },
   { tag: "brandName", label: "Brand name", sample: "Analytical Engines" },
   { tag: "primaryCategory", label: "Primary category", sample: "Ceramics" },
@@ -253,6 +294,7 @@ export const MERGE_TAGS: Record<TemplateKey, MergeTag[]> = {
   confirmation: ALL_MERGE_TAGS,
   rejection: ALL_MERGE_TAGS,
   waitlist: ALL_MERGE_TAGS,
+  withdrawn: ALL_MERGE_TAGS,
 };
 
 // ---------------------------------------------------------------------------
@@ -278,15 +320,13 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
         type: "hero",
         tag: "Application Approved",
         heading: "Congratulations, {{firstName}}! 🎨",
-        subtext:
-          "Your application has been approved.\nComplete your payment to secure your spot.",
+        subtext: "Your application has been approved.\nComplete your payment to secure your spot.",
         showReference: true,
       }),
       b({
         id: "greeting",
         type: "paragraph",
-        text:
-          "Hi {{firstName}},\n\nWe're so excited to have you join us at **{{eventName}}**! 🌿 Your spot is almost secured — just one step left. Please complete your payment by **{{dueDate}}** to confirm your place at the event.",
+        text: "Hi {{firstName}},\n\nWe're so excited to have you join us at **{{eventName}}**! 🌿 Your spot is almost secured — just one step left. Please complete your payment by **{{dueDate}}** to confirm your place at the event.",
       }),
       b({
         id: "summary",
@@ -312,8 +352,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "closing",
         type: "paragraph",
-        text:
-          "Once your payment is received and confirmed, we'll send you a follow-up email with all the event details you need. 🌿\n\nIf you have any questions, don't hesitate to reach out — we're always happy to help!\n\nWarm regards,\nThe Mellow Art Team",
+        text: "Once your payment is received and confirmed, we'll send you a follow-up email with all the event details you need. 🌿\n\nIf you have any questions, don't hesitate to reach out — we're always happy to help!\n\nWarm regards,\nThe Mellow Art Team",
       }),
     ],
   },
@@ -325,8 +364,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "intro",
         type: "paragraph",
-        text:
-          "Thanks for applying to Mellow Art Market! We've received your application for **{{brandName}}** and our team will be reviewing it shortly.",
+        text: "Thanks for applying to Mellow Art Market! We've received your application for **{{brandName}}** and our team will be reviewing it shortly.",
       }),
       b({
         id: "steps",
@@ -352,8 +390,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "outro",
         type: "paragraph",
-        text:
-          "If you need to update any part of your application, reply to this email and let us know — please don't submit a duplicate application.\n\nWarmly,\nThe Mellow Art Team",
+        text: "If you need to update any part of your application, reply to this email and let us know — please don't submit a duplicate application.\n\nWarmly,\nThe Mellow Art Team",
       }),
     ],
   },
@@ -365,8 +402,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "body",
         type: "paragraph",
-        text:
-          "Thank you for your submission (**{{reference}}**). After review, it has **not been accepted** at this time.",
+        text: "Thank you for your submission (**{{reference}}**). After review, it has **not been accepted** at this time.",
       }),
       b({
         id: "reason",
@@ -385,8 +421,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "body",
         type: "paragraph",
-        text:
-          "Thank you for your submission (**{{reference}}**). After review, you've been placed on our **waitlist**. If a spot opens up, we'll be in touch.",
+        text: "Thank you for your submission (**{{reference}}**). After review, you've been placed on our **waitlist**. If a spot opens up, we'll be in touch.",
       }),
       b({
         id: "reason",
@@ -394,6 +429,18 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
         label: "Reason",
         rows: [{ label: "", value: "{{reason}}" }],
         hideIfEmpty: "{{reason}}",
+      }),
+    ],
+  },
+  withdrawn: {
+    subject: "Your Mellow Art application {{reference}} has been withdrawn",
+    preheader: "Confirmation that your application is withdrawn.",
+    blocks: [
+      b({ id: "greeting", type: "paragraph", text: "Hi {{firstName}}," }),
+      b({
+        id: "body",
+        type: "paragraph",
+        text: "Your application (**{{reference}}**) has been marked as withdrawn. It will no longer be considered for this event. If this was a mistake, please reply to this email.",
       }),
     ],
   },

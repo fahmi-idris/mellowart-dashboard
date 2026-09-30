@@ -1,9 +1,4 @@
-import {
-  type RouteConfig,
-  index,
-  route,
-  layout,
-} from "@react-router/dev/routes";
+import { type RouteConfig, index, route, layout } from "@react-router/dev/routes";
 
 export default [
   // Public
@@ -29,6 +24,7 @@ export default [
   route("api/summary", "routes/api.summary.tsx"), // admin-only dashboard counts
   route("api/submit", "routes/api.submit.tsx"), // public, CLIENT_KEY-protected
   route("api/files/*", "routes/api.files.$.tsx"), // admin-only R2 image streamer
+  route("email-assets/*", "routes/email-assets.$.tsx"), // public email images from R2
 
   // Xero OAuth2 (web app) connect flow — admin-only resource routes
   route("xero/authorize", "routes/xero.authorize.tsx"),

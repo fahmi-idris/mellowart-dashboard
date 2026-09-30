@@ -50,9 +50,8 @@ export const ArtistFieldsSchema = z.object({
 
 export type ArtistFields = z.infer<typeof ArtistFieldsSchema>;
 
-// File upload constraints. The portfolio is a single 1-page A4 document and the
-// insurance certificate is an optional single document — both may be a PDF or an
-// image export.
+// File upload constraints. The portfolio is one 1-page A4 document; insurance
+// accepts zero or more documents. Both may be a PDF or image export.
 export const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 export const ALLOWED_DOC_TYPES = [
   "application/pdf",

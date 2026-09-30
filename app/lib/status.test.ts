@@ -14,14 +14,16 @@ import {
 } from "./status";
 
 describe("application status", () => {
-  it("recognises the four spec states and nothing else", () => {
+  it("recognises the five application states and nothing else", () => {
     expect(APPLICATION_STATUSES).toEqual([
       "pending",
       "accepted",
       "waitlisted",
       "rejected",
+      "withdrawn",
     ]);
     expect(isApplicationStatus("accepted")).toBe(true);
+    expect(isApplicationStatus("withdrawn")).toBe(true);
     expect(isApplicationStatus("approved")).toBe(false);
     expect(isApplicationStatus("nonsense")).toBe(false);
   });
@@ -30,6 +32,7 @@ describe("application status", () => {
     expect(isAccepted("accepted")).toBe(true);
     expect(isAccepted("waitlisted")).toBe(false);
     expect(isAccepted("pending")).toBe(false);
+    expect(isAccepted("withdrawn")).toBe(false);
   });
 });
 
@@ -39,6 +42,7 @@ describe("colour coding (per Alison's request)", () => {
     expect(APPLICATION_TONE.waitlisted).toBe("yellow");
     expect(APPLICATION_TONE.rejected).toBe("red");
     expect(APPLICATION_TONE.pending).toBe("grey");
+    expect(APPLICATION_TONE.withdrawn).toBe("grey");
     expect(applicationToneClass("accepted")).toBe(TONE_CLASS.green);
   });
 
@@ -53,12 +57,7 @@ describe("colour coding (per Alison's request)", () => {
 
 describe("manual payment statuses", () => {
   it("only admits the hand-settable subset", () => {
-    expect(MANUAL_PAYMENT_STATUSES).toEqual([
-      "awaiting_payment",
-      "paid",
-      "overdue",
-      "voided",
-    ]);
+    expect(MANUAL_PAYMENT_STATUSES).toEqual(["awaiting_payment", "paid", "overdue", "voided"]);
     expect(isManualPaymentStatus("paid")).toBe(true);
     expect(isManualPaymentStatus("none")).toBe(false);
     expect(isManualPaymentStatus("invoicing")).toBe(false);

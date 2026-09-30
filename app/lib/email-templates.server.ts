@@ -55,10 +55,7 @@ function interpolateHtml(raw: string, ctx: Record<string, string>): string {
 }
 
 function isHidden(block: EmailBlock, ctx: Record<string, string>): boolean {
-  return (
-    block.hideIfEmpty != null &&
-    interpolateRaw(block.hideIfEmpty, ctx).trim() === ""
-  );
+  return block.hideIfEmpty != null && interpolateRaw(block.hideIfEmpty, ctx).trim() === "";
 }
 
 // ---------------------------------------------------------------------------
@@ -117,11 +114,7 @@ function renderBank(br: EmailBranding, ctx: Record<string, string>): string {
   </div></div>`;
 }
 
-function renderBlock(
-  block: EmailBlock,
-  br: EmailBranding,
-  ctx: Record<string, string>,
-): string {
+function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, string>): string {
   if (isHidden(block, ctx)) return "";
   switch (block.type) {
     case "hero": {
@@ -135,6 +128,19 @@ function renderBlock(
         ? `<div style="display:inline-block;margin-top:16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:12px;letter-spacing:.08em;padding:6px 16px;border-radius:8px;font-family:monospace">${interpolateHtml("{{reference}}", ctx)}</div>`
         : "";
       return `<div style="background:${br.brandColor};padding:40px;text-align:center">${tag}<h1 style="font-size:26px;font-weight:600;color:#fff;line-height:1.3;margin:0 0 12px">${interpolateHtml(block.heading, ctx)}</h1>${subtext}${ref}</div>`;
+    }
+    case "image": {
+      const rawUrl = interpolateRaw(block.url ?? "", ctx).trim();
+      if (!/^https?:\/\//i.test(rawUrl)) return "";
+      const src = escapeHtml(rawUrl);
+      const alt = escapeHtml(interpolateRaw(block.alt ?? "", ctx));
+      const width = block.width === "small" ? 200 : block.width === "medium" ? 360 : 520;
+      const image = `<img src="${src}" alt="${alt}" width="${width}" style="display:block;width:100%;max-width:${width}px;height:auto;margin:0 auto;border:0;border-radius:8px"/>`;
+      const rawLink = interpolateRaw(block.linkUrl ?? "", ctx).trim();
+      const linked = /^https?:\/\//i.test(rawLink)
+        ? `<a href="${escapeHtml(rawLink)}" style="display:inline-block;text-decoration:none">${image}</a>`
+        : image;
+      return `<div style="padding:20px 40px 4px;text-align:center">${linked}</div>`;
     }
     case "heading":
       return `<div style="padding:22px 40px 0"><h2 style="margin:0;font-size:18px;font-weight:600;color:#2C2422">${interpolateHtml(block.text, ctx)}</h2></div>`;
@@ -206,10 +212,16 @@ export function renderContent(
   content: TemplateContent,
   br: EmailBranding,
   ctx: Record<string, string>,
+  options: { includeBlockMarkers?: boolean } = {},
 ): { subject: string; html: string } {
   const withDefaults = { contactEmail: br.contactEmail, ...ctx };
   const body = content.blocks
-    .map((blk) => renderBlock(blk, br, withDefaults))
+    .map((block) => {
+      const html = renderBlock(block, br, withDefaults);
+      return options.includeBlockMarkers
+        ? `<div data-email-block-id="${escapeHtml(block.id)}">${html}</div>`
+        : html;
+    })
     .join("");
   const preheader = interpolateRaw(content.preheader ?? "", withDefaults).trim();
   const preheaderHtml = preheader
@@ -239,10 +251,7 @@ function isTemplateKey(k: string): k is TemplateKey {
 }
 
 /** Saved template for a key, or the code default when unsaved/malformed. */
-export async function getTemplate(
-  db: D1Database,
-  key: TemplateKey,
-): Promise<TemplateContent> {
+export async function getTemplate(db: D1Database, key: TemplateKey): Promise<TemplateContent> {
   const row = await db
     .prepare("SELECT subject, preheader, blocks FROM email_templates WHERE key = ?")
     .bind(key)
@@ -312,10 +321,7 @@ export async function getBranding(db: D1Database): Promise<EmailBranding> {
   return row ?? DEFAULT_BRANDING;
 }
 
-export async function updateBranding(
-  db: D1Database,
-  br: EmailBranding,
-): Promise<void> {
+export async function updateBranding(db: D1Database, br: EmailBranding): Promise<void> {
   await db
     .prepare(
       `INSERT INTO email_branding
@@ -361,10 +367,7 @@ export async function renderTemplate(
   key: TemplateKey,
   ctx: Record<string, string>,
 ): Promise<OutgoingEmail> {
-  const [branding, content] = await Promise.all([
-    getBranding(db),
-    getTemplate(db, key),
-  ]);
+  const [branding, content] = await Promise.all([getBranding(db), getTemplate(db, key)]);
   let rendered: { subject: string; html: string };
   try {
     rendered = renderContent(content, branding, ctx);

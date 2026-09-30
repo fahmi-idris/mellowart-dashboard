@@ -1,17 +1,11 @@
 import { env } from "cloudflare:workers";
 
 import type { Route } from "./+types/api.submit";
-import {
-  ALLOWED_DOC_TYPES,
-  ArtistFieldsSchema,
-  MAX_FILE_BYTES,
-} from "~/lib/artist";
+import { ALLOWED_DOC_TYPES, ArtistFieldsSchema, MAX_FILE_BYTES } from "~/lib/artist";
 import { findEventBySlug } from "~/lib/events.server";
+import { collectFormFiles } from "~/lib/form-files";
 import { sendConfirmationEmail } from "~/lib/jobs.server";
-import {
-  createArtistSubmission,
-  type UploadFile,
-} from "~/lib/submissions.server";
+import { createArtistSubmission, type UploadFile } from "~/lib/submissions.server";
 
 /**
  * Public artist-application submission endpoint (multipart/form-data).
@@ -63,14 +57,10 @@ function pickOptional(form: FormData, ...keys: string[]): string | undefined {
 }
 
 /** First present form entry (file or text) across several field names. */
-function pickEntry(
-  form: FormData,
-  ...keys: string[]
-): FormDataEntryValue | null {
+function pickEntry(form: FormData, ...keys: string[]): FormDataEntryValue | null {
   for (const k of keys) {
     const v = form.get(k);
-    if (v instanceof File ? v.size > 0 : typeof v === "string" && v.trim())
-      return v;
+    if (v instanceof File ? v.size > 0 : typeof v === "string" && v.trim()) return v;
   }
   return null;
 }
@@ -137,18 +127,8 @@ export async function action({ request }: Route.ActionArgs) {
     // Webflow `buddy-*` name and the legacy `second*` name are also accepted so
     // data flows however the form forwards it. buddy-email-02 is a confirm
     // field and is never stored.
-    secondFirstName: pickOptional(
-      form,
-      "buddyFirstName",
-      "buddy-first-name",
-      "secondFirstName",
-    ),
-    secondLastName: pickOptional(
-      form,
-      "buddyLastName",
-      "buddy-last-name",
-      "secondLastName",
-    ),
+    secondFirstName: pickOptional(form, "buddyFirstName", "buddy-first-name", "secondFirstName"),
+    secondLastName: pickOptional(form, "buddyLastName", "buddy-last-name", "secondLastName"),
     secondEmail: pickOptional(form, "buddyEmail", "buddy-email-01", "secondEmail"),
     secondAppliedBefore: pickOptional(
       form,
@@ -156,24 +136,9 @@ export async function action({ request }: Route.ActionArgs) {
       "buddy-first-timer",
       "secondAppliedBefore",
     ),
-    secondBrandName: pickOptional(
-      form,
-      "buddyBrandName",
-      "buddy-brand-name",
-      "secondBrandName",
-    ),
-    secondWebsite: pickOptional(
-      form,
-      "buddyWebsite",
-      "buddy-website",
-      "secondWebsite",
-    ),
-    secondInstagram: pickOptional(
-      form,
-      "buddyInstagram",
-      "buddy-instagram",
-      "secondInstagram",
-    ),
+    secondBrandName: pickOptional(form, "buddyBrandName", "buddy-brand-name", "secondBrandName"),
+    secondWebsite: pickOptional(form, "buddyWebsite", "buddy-website", "secondWebsite"),
+    secondInstagram: pickOptional(form, "buddyInstagram", "buddy-instagram", "secondInstagram"),
     secondBio: pickOptional(form, "buddyBio", "buddy-artist-bio", "secondBio"),
     secondPrimaryCategory: pickOptional(
       form,
@@ -198,13 +163,14 @@ export async function action({ request }: Route.ActionArgs) {
     return bad(422, "Validation failed", parsed.error.flatten());
   }
 
-  // Files: a single required portfolio document + an optional insurance cert.
+  // Files: one required portfolio document + zero or more insurance documents.
   const portfolio = form.get("portfolio");
   if (!(portfolio instanceof File) || portfolio.size === 0) {
     return bad(422, "A portfolio document is required");
   }
-  const insurance = form.get("insurance");
-  const hasInsuranceFile = insurance instanceof File && insurance.size > 0;
+  // Webflow may repeat the same multipart key or use the conventional [] form.
+  // `get()` would silently discard every insurance document after the first.
+  const insuranceFiles = collectFormFiles(form, "insurance", "insurance[]");
 
   // Optional second-artist portfolio (shared stall). Same rules as the main one.
   const secondPortfolio = pickEntry(
@@ -213,12 +179,11 @@ export async function action({ request }: Route.ActionArgs) {
     "buddy-portfolio-file",
     "secondPortfolio",
   );
-  const hasSecondPortfolio =
-    secondPortfolio instanceof File && secondPortfolio.size > 0;
+  const hasSecondPortfolio = secondPortfolio instanceof File && secondPortfolio.size > 0;
 
   for (const file of [
     portfolio,
-    ...(hasInsuranceFile ? [insurance] : []),
+    ...insuranceFiles,
     ...(hasSecondPortfolio ? [secondPortfolio] : []),
   ]) {
     const err = validateDoc(file as File);
@@ -233,17 +198,15 @@ export async function action({ request }: Route.ActionArgs) {
       size: portfolio.size,
       sortOrder: 0,
     },
-    ...(hasInsuranceFile
-      ? [
-          {
-            kind: "insurance" as const,
-            data: await insurance.arrayBuffer(),
-            contentType: insurance.type,
-            size: insurance.size,
-            sortOrder: 0,
-          },
-        ]
-      : []),
+    ...(await Promise.all(
+      insuranceFiles.map(async (insurance, sortOrder) => ({
+        kind: "insurance" as const,
+        data: await insurance.arrayBuffer(),
+        contentType: insurance.type,
+        size: insurance.size,
+        sortOrder,
+      })),
+    )),
     ...(hasSecondPortfolio
       ? [
           {
@@ -270,14 +233,7 @@ export async function action({ request }: Route.ActionArgs) {
   // Stall preferences come in as slugs and are stored as-is; they're resolved
   // against the event's stall options at read time. The admin still assigns the
   // billed stall (stall_option_id) later, so it starts null.
-  const id = await createArtistSubmission(
-    env.DB,
-    env.BUCKET,
-    parsed.data,
-    files,
-    eventId,
-    null,
-  );
+  const id = await createArtistSubmission(env.DB, env.BUCKET, parsed.data, files, eventId, null);
 
   // Best-effort confirmation email — never fail the submission if mail is down.
   await sendConfirmationEmail(env, id);

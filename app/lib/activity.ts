@@ -13,6 +13,7 @@ export type ActivityItem = {
 const DOT: Record<string, string> = {
   approved: "#16a34a",
   invoice_sent: "#16a34a",
+  email_sent: "#2563eb",
   paid: "#16a34a",
   awaiting: "#60a5fa",
   pending: "#a3a3a3",
@@ -20,6 +21,8 @@ const DOT: Record<string, string> = {
   overdue: "#f97316",
   voided: "#a3a3a3",
   rejected: "#ef4444",
+  withdrawn: "#737373",
+  deleted: "#ef4444",
 };
 
 export function activityDot(type: string): string {
@@ -29,6 +32,7 @@ export function activityDot(type: string): string {
 const LABEL: Record<string, string> = {
   approved: "Approved",
   invoice_sent: "Invoice sent",
+  email_sent: "Email sent",
   paid: "Payment",
   awaiting: "Awaiting",
   pending: "Pending",
@@ -36,6 +40,8 @@ const LABEL: Record<string, string> = {
   overdue: "Overdue",
   voided: "Voided",
   rejected: "Rejected",
+  withdrawn: "Withdrawn",
+  deleted: "Deleted",
 };
 
 export function activityLabel(type: string): string {

@@ -40,6 +40,28 @@ export async function setApplicationStatus(
   return (res.meta.changes ?? 0) > 0;
 }
 
+/** Apply one decision to a bounded, explicit selection in one D1 batch. */
+export async function setApplicationStatuses(
+  db: D1Database,
+  ids: string[],
+  status: ApplicationStatus,
+  decidedBy: string,
+): Promise<number> {
+  const statements = ids.map((id) =>
+    db
+      .prepare(
+        `UPDATE submissions
+          SET status = ?, reject_reason = NULL, waitlist_reason = NULL,
+              decided_by = ?, decided_at = datetime('now'),
+              updated_at = datetime('now')
+        WHERE id = ?`,
+      )
+      .bind(status, decidedBy, id),
+  );
+  const results = await db.batch(statements);
+  return results.reduce((count, result) => count + (result.meta.changes ?? 0), 0);
+}
+
 /**
  * Assign (or clear, with null) the stall for an accepted submission. When
  * assigning, the stall must belong to the submission's own event — stall
@@ -80,10 +102,7 @@ export async function assignStall(
  * machine, triggered by the admin's "Send Xero invoice" action. Guarding on
  * `stall_option_id IS NOT NULL` ensures the invoice always has a price.
  */
-export async function startInvoicing(
-  db: D1Database,
-  id: string,
-): Promise<boolean> {
+export async function startInvoicing(db: D1Database, id: string): Promise<boolean> {
   const res = await db
     .prepare(
       `UPDATE submissions
@@ -104,10 +123,7 @@ export async function startInvoicing(
  * retry "Send invoice". Guarded on `xero_invoice_id IS NULL` so a row that did
  * get an invoice attached is never reset.
  */
-export async function cancelInvoicing(
-  db: D1Database,
-  id: string,
-): Promise<boolean> {
+export async function cancelInvoicing(db: D1Database, id: string): Promise<boolean> {
   const res = await db
     .prepare(
       `UPDATE submissions
@@ -151,9 +167,7 @@ export async function findByInvoiceId(
   xeroInvoiceId: string,
 ): Promise<InvoiceLookupRow | null> {
   return db
-    .prepare(
-      "SELECT id, payment_status FROM submissions WHERE xero_invoice_id = ?",
-    )
+    .prepare("SELECT id, payment_status FROM submissions WHERE xero_invoice_id = ?")
     .bind(xeroInvoiceId)
     .first<InvoiceLookupRow>();
 }

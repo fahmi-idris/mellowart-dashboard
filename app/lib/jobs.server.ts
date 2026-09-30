@@ -1,10 +1,6 @@
 import { sendEmail } from "~/lib/gmail.server";
 import { renderTemplate } from "~/lib/email-templates.server";
-import {
-  formatDueDate,
-  getInvoiceSettings,
-  saveInvoiceRecord,
-} from "~/lib/invoices.server";
+import { formatDueDate, getInvoiceSettings, saveInvoiceRecord } from "~/lib/invoices.server";
 import { attachInvoice } from "~/lib/payments.server";
 import { createInvoice } from "~/lib/xero-client.server";
 
@@ -21,9 +17,7 @@ interface InvoiceSubmissionRow {
 }
 
 function isoDate(daysFromNow: number): string {
-  return new Date(Date.now() + daysFromNow * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
+  return new Date(Date.now() + daysFromNow * 86_400_000).toISOString().slice(0, 10);
 }
 
 /** Friendly due date for the email, e.g. "15 Aug 2026". */
@@ -32,10 +26,7 @@ function money(amount: number | null, currency: string): string {
 }
 
 // approve → invoicing → (this) create Xero invoice from DB config → awaiting_payment
-export async function createInvoiceForSubmission(
-  env: Env,
-  submissionId: string,
-): Promise<void> {
+export async function createInvoiceForSubmission(env: Env, submissionId: string): Promise<void> {
   const row = await env.DB.prepare(
     `SELECT s.id, s.first_name, s.last_name, s.email, s.payment_status,
             e.name AS event_name,
@@ -126,10 +117,7 @@ export async function createInvoiceForSubmission(
 
 // Best-effort confirmation email sent right after a public application lands.
 // Never let a mail failure (or a missing Gmail connection) fail the submission.
-export async function sendConfirmationEmail(
-  env: Env,
-  submissionId: string,
-): Promise<void> {
+export async function sendConfirmationEmail(env: Env, submissionId: string): Promise<void> {
   // Resolve the event name and the applicant's requested stall types (their
   // first + second stall preferences, slugs resolved to the option tier labels —
   // the assigned stall_option_id is still null at submission time).
@@ -184,20 +172,19 @@ export async function sendConfirmationEmail(
   }
 }
 
-// Best-effort rejection email with the admin's optional reason. Never let a
-// mail failure (or a missing Gmail connection) undo the rejection — it's
-// already recorded.
+// Manually send the rejection email with the admin's optional reason. Returns
+// whether Gmail accepted the message so the UI can report an honest result.
 export async function sendRejectionEmail(
   env: Env,
   submissionId: string,
   reason: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const row = await env.DB.prepare(
     "SELECT id, first_name, last_name, email FROM submissions WHERE id = ?",
   )
     .bind(submissionId)
     .first<{ id: string; first_name: string; last_name: string; email: string }>();
-  if (!row) return;
+  if (!row) return false;
 
   try {
     await sendEmail(
@@ -211,25 +198,26 @@ export async function sendRejectionEmail(
         reason: reason ?? "",
       }),
     );
+    return true;
   } catch (err) {
-    console.error("Rejection email failed (submission still rejected)", err);
+    console.error("Rejection email failed", err);
+    return false;
   }
 }
 
-// Best-effort waitlist email with the admin's optional reason. Never let a mail
-// failure (or a missing Gmail connection) undo the decision — it's already
-// recorded.
+// Manually send the waitlist email. Returns whether Gmail accepted the message
+// so the UI can report an honest result.
 export async function sendWaitlistEmail(
   env: Env,
   submissionId: string,
   reason: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const row = await env.DB.prepare(
     "SELECT id, first_name, last_name, email FROM submissions WHERE id = ?",
   )
     .bind(submissionId)
     .first<{ id: string; first_name: string; last_name: string; email: string }>();
-  if (!row) return;
+  if (!row) return false;
 
   try {
     await sendEmail(
@@ -243,7 +231,35 @@ export async function sendWaitlistEmail(
         reason: reason ?? "",
       }),
     );
+    return true;
   } catch (err) {
-    console.error("Waitlist email failed (submission still waitlisted)", err);
+    console.error("Waitlist email failed", err);
+    return false;
+  }
+}
+
+/** Manually send the withdrawal notice after the status has been saved. */
+export async function sendWithdrawnEmail(env: Env, submissionId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    "SELECT id, first_name, last_name, email FROM submissions WHERE id = ? AND status = 'withdrawn'",
+  )
+    .bind(submissionId)
+    .first<{ id: string; first_name: string; last_name: string; email: string }>();
+  if (!row) return false;
+  try {
+    await sendEmail(
+      env,
+      await renderTemplate(env.DB, "withdrawn", {
+        name: `${row.first_name} ${row.last_name}`.trim(),
+        firstName: row.first_name,
+        lastName: row.last_name,
+        email: row.email,
+        reference: row.id,
+      }),
+    );
+    return true;
+  } catch (err) {
+    console.error("Withdrawn email failed", err);
+    return false;
   }
 }

@@ -28,30 +28,30 @@ All sent as `multipart/form-data` parts.
 
 ### Text fields
 
-| Field | Required | Rules |
-| --- | --- | --- |
-| `firstName` | ✅ | non-empty |
-| `lastName` | ✅ | non-empty |
-| `email` | ✅ | valid email |
-| `confirmEmail` | optional | re-enter email — if sent, must equal `email` (case-insensitive); never stored |
-| `appliedBefore` | ✅ | non-empty (e.g. "Yes" / "No") |
-| `brandName` | ✅ | non-empty |
-| `website` | ✅ | non-empty (send `N/A` if none) |
-| `instagram` | ✅ | non-empty (e.g. `@brand`) |
-| `bio` | ✅ | non-empty |
-| `primaryCategory` | ✅ | non-empty |
-| `secondaryCategory` | ✅ | non-empty |
-| `productDescription` | ✅ | non-empty |
-| `additionalNotes` | optional | any length |
-| `firstStallPreference` | ✅ | non-empty — chosen stall's **slug** (see below) |
-| `secondStallPreference` | ✅ | non-empty — chosen stall's **slug** (see below) |
-| `offerMiniIfUnavailable` | ✅ | non-empty (e.g. "Yes" / "No") |
-| `sharingStall` | ✅ | non-empty (e.g. "Yes" / "No") |
-| `hasInsurance` | ✅ | non-empty (e.g. "Yes" / "No") |
-| `consentDebut` | ✅ | must be truthy — `true` / `on` / `1` / `yes` |
-| `consentSharing` | ✅ | must be truthy — `true` / `on` / `1` / `yes` |
-| `consentSetupGuide` | ✅ | must be truthy — `true` / `on` / `1` / `yes` |
-| `eventSlug` | optional | event **slug** (Webflow Item ID / local id also accepted) — see below |
+| Field                    | Required | Rules                                                                         |
+| ------------------------ | -------- | ----------------------------------------------------------------------------- |
+| `firstName`              | ✅       | non-empty                                                                     |
+| `lastName`               | ✅       | non-empty                                                                     |
+| `email`                  | ✅       | valid email                                                                   |
+| `confirmEmail`           | optional | re-enter email — if sent, must equal `email` (case-insensitive); never stored |
+| `appliedBefore`          | ✅       | non-empty (e.g. "Yes" / "No")                                                 |
+| `brandName`              | ✅       | non-empty                                                                     |
+| `website`                | ✅       | non-empty (send `N/A` if none)                                                |
+| `instagram`              | ✅       | non-empty (e.g. `@brand`)                                                     |
+| `bio`                    | ✅       | non-empty                                                                     |
+| `primaryCategory`        | ✅       | non-empty                                                                     |
+| `secondaryCategory`      | ✅       | non-empty                                                                     |
+| `productDescription`     | ✅       | non-empty                                                                     |
+| `additionalNotes`        | optional | any length                                                                    |
+| `firstStallPreference`   | ✅       | non-empty — chosen stall's **slug** (see below)                               |
+| `secondStallPreference`  | ✅       | non-empty — chosen stall's **slug** (see below)                               |
+| `offerMiniIfUnavailable` | ✅       | non-empty (e.g. "Yes" / "No")                                                 |
+| `sharingStall`           | ✅       | non-empty (e.g. "Yes" / "No")                                                 |
+| `hasInsurance`           | ✅       | non-empty (e.g. "Yes" / "No")                                                 |
+| `consentDebut`           | ✅       | must be truthy — `true` / `on` / `1` / `yes`                                  |
+| `consentSharing`         | ✅       | must be truthy — `true` / `on` / `1` / `yes`                                  |
+| `consentSetupGuide`      | ✅       | must be truthy — `true` / `on` / `1` / `yes`                                  |
+| `eventSlug`              | optional | event **slug** (Webflow Item ID / local id also accepted) — see below         |
 
 ### Shared-stall second artist ("buddy")
 
@@ -63,24 +63,25 @@ Each field is accepted under **any** of three names — the API name (`buddy*`),
 the native Webflow name, or the legacy `second*` name. Send whichever your
 integration has.
 
-| Field | Webflow field | Legacy alias | Rules |
-| --- | --- | --- | --- |
-| `buddyFirstName` | `buddy-first-name` | `secondFirstName` | non-empty |
-| `buddyLastName` | `buddy-last-name` | `secondLastName` | non-empty |
-| `buddyEmail` | `buddy-email-01` | `secondEmail` | valid email |
-| `buddyAppliedBefore` | `buddy-first-timer` | `secondAppliedBefore` | non-empty |
-| `buddyBrandName` | `buddy-brand-name` | `secondBrandName` | non-empty |
-| `buddyWebsite` | `buddy-website` | `secondWebsite` | non-empty |
-| `buddyInstagram` | `buddy-instagram` | `secondInstagram` | non-empty |
-| `buddyBio` | `buddy-artist-bio` | `secondBio` | non-empty |
-| `buddyPrimaryCategory` | `buddy-category-01` | `secondPrimaryCategory` | non-empty |
-| `buddySecondaryCategory` | `buddy-category-02` | `secondSecondaryCategory` | non-empty |
-| `buddyProductDescription` | `buddy-product-info` | `secondProductDescription` | non-empty |
+| Field                     | Webflow field        | Legacy alias               | Rules       |
+| ------------------------- | -------------------- | -------------------------- | ----------- |
+| `buddyFirstName`          | `buddy-first-name`   | `secondFirstName`          | non-empty   |
+| `buddyLastName`           | `buddy-last-name`    | `secondLastName`           | non-empty   |
+| `buddyEmail`              | `buddy-email-01`     | `secondEmail`              | valid email |
+| `buddyAppliedBefore`      | `buddy-first-timer`  | `secondAppliedBefore`      | non-empty   |
+| `buddyBrandName`          | `buddy-brand-name`   | `secondBrandName`          | non-empty   |
+| `buddyWebsite`            | `buddy-website`      | `secondWebsite`            | non-empty   |
+| `buddyInstagram`          | `buddy-instagram`    | `secondInstagram`          | non-empty   |
+| `buddyBio`                | `buddy-artist-bio`   | `secondBio`                | non-empty   |
+| `buddyPrimaryCategory`    | `buddy-category-01`  | `secondPrimaryCategory`    | non-empty   |
+| `buddySecondaryCategory`  | `buddy-category-02`  | `secondSecondaryCategory`  | non-empty   |
+| `buddyProductDescription` | `buddy-product-info` | `secondProductDescription` | non-empty   |
 
 The buddy "confirm email" (`buddy-email-02`) is a client-side check only — do
 not send it; it is never stored.
 
 Notes:
+
 - Text fields have **no maximum length** — required fields just need to be
   non-empty after trimming. (Files still have size/type limits; see below.)
 - The three consent flags are mandatory and must be truthy. Accepted truthy
@@ -117,20 +118,19 @@ so the application is filed under that event in the dashboard.
 
 ### Document files
 
-| Field | Required | Count | Per-file rules |
-| --- | --- | --- | --- |
-| `portfolio` | ✅ | exactly 1 | 1-page A4 portfolio (PDF or image) — see below |
-| `insurance` | optional | 0 or 1 | Certificate of Currency (PDF or image) |
-| `buddyPortfolio` | optional | 0 or 1 | Second artist's portfolio (Webflow `buddy-portfolio-file`, legacy `secondPortfolio`), shared stall only |
+| Field            | Required | Count     | Per-file rules                                                                                                           |
+| ---------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `portfolio`      | ✅       | exactly 1 | 1-page A4 portfolio (PDF or image) — see below                                                                           |
+| `insurance`      | optional | 0 or more | Certificate of Currency files (PDF or image). Repeat the multipart field for every file. `insurance[]` is also accepted. |
+| `buddyPortfolio` | optional | 0 or 1    | Second artist's portfolio (Webflow `buddy-portfolio-file`, legacy `secondPortfolio`), shared stall only                  |
 
-Per-file rules (apply to both):
+Per-file rules (apply to every document):
 
 - **Allowed types:** `application/pdf`, `image/jpeg`, `image/png`, `image/webp`,
   `image/avif`, `image/gif`. The check is on the part's MIME type — set it
   correctly.
 - **Max size:** 10 MB per file.
-- Empty (0-byte) files are rejected. A 0-byte `insurance` part is treated as "no
-  file".
+- Empty (0-byte) files are rejected. Empty `insurance` parts are ignored.
 
 > Note: the recommended filename convention `[BRANDNAME]_portfolio2512` is **not
 > enforced** by the API — it's a guideline for applicants only.
@@ -148,15 +148,15 @@ on the invoice and in confirmation/approval/rejection emails.
 
 ### Errors
 
-| Status | Body | Meaning |
-| --- | --- | --- |
-| `401` | `{ "error": "Unauthorized" }` | Missing/wrong `X-Client-Key`. |
-| `400` | `{ "error": "Expected multipart/form-data" }` | Body wasn't multipart. |
-| `422` | `{ "error": "Email addresses do not match" }` | `confirmEmail` sent but ≠ `email`. |
-| `422` | `{ "error": "Validation failed", "issues": { ... } }` | Text fields failed zod validation. `issues` is a zod flatten (`formErrors` + `fieldErrors`). |
-| `422` | `{ "error": "A portfolio document is required" }` | Missing/empty `portfolio`. |
-| `422` | `{ "error": "<filename>: Unsupported file type: <type> (PDF or image only)" }` | A file failed the type/size/empty check. |
-| `405` | `{ "error": "Method not allowed" }` | Used a method other than POST. |
+| Status | Body                                                                           | Meaning                                                                                      |
+| ------ | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `401`  | `{ "error": "Unauthorized" }`                                                  | Missing/wrong `X-Client-Key`.                                                                |
+| `400`  | `{ "error": "Expected multipart/form-data" }`                                  | Body wasn't multipart.                                                                       |
+| `422`  | `{ "error": "Email addresses do not match" }`                                  | `confirmEmail` sent but ≠ `email`.                                                           |
+| `422`  | `{ "error": "Validation failed", "issues": { ... } }`                          | Text fields failed zod validation. `issues` is a zod flatten (`formErrors` + `fieldErrors`). |
+| `422`  | `{ "error": "A portfolio document is required" }`                              | Missing/empty `portfolio`.                                                                   |
+| `422`  | `{ "error": "<filename>: Unsupported file type: <type> (PDF or image only)" }` | A file failed the type/size/empty check.                                                     |
+| `405`  | `{ "error": "Method not allowed" }`                                            | Used a method other than POST.                                                               |
 
 ## Example — cURL
 
@@ -185,7 +185,8 @@ curl -X POST https://mellow-cf.mellowartmarket.workers.dev/api/submit \
   -F "consentSetupGuide=true" \
   -F "eventSlug=mellow-debut-2025" \
   -F "portfolio=@portfolio.pdf;type=application/pdf" \
-  -F "insurance=@insurance.pdf;type=application/pdf"
+  -F "insurance=@public-liability.pdf;type=application/pdf" \
+  -F "insurance=@product-liability.pdf;type=application/pdf"
 ```
 
 When `sharingStall=Yes`, also attach the second artist's fields and portfolio
@@ -217,17 +218,17 @@ const form = new FormData();
 form.set("firstName", "Aria");
 form.set("lastName", "Tester");
 form.set("email", "artist@example.com");
-form.set("confirmEmail", "artist@example.com");  // optional re-enter check
+form.set("confirmEmail", "artist@example.com"); // optional re-enter check
 form.set("appliedBefore", "No");
 form.set("brandName", "Aria Studio");
-form.set("website", "https://ariastudio.com");   // "N/A" if none
+form.set("website", "https://ariastudio.com"); // "N/A" if none
 form.set("instagram", "@ariastudio");
 form.set("bio", bioText);
 form.set("primaryCategory", "Painting");
 form.set("secondaryCategory", "Illustration");
 form.set("productDescription", "Original paintings and prints");
-form.set("firstStallPreference", "standard");     // stall slug
-form.set("secondStallPreference", "mini");        // stall slug
+form.set("firstStallPreference", "standard"); // stall slug
+form.set("secondStallPreference", "mini"); // stall slug
 form.set("offerMiniIfUnavailable", "Yes");
 form.set("sharingStall", "No");
 form.set("hasInsurance", "Yes");
@@ -237,8 +238,11 @@ form.set("consentSetupGuide", "true");
 form.set("eventSlug", "mellow-debut-2025"); // optional: scope to event
 
 // Files (Blob/File with a correct type).
-form.set("portfolio", portfolioFile, "portfolio.pdf");      // required
-if (insuranceFile) form.set("insurance", insuranceFile, "insurance.pdf"); // optional
+form.set("portfolio", portfolioFile, "portfolio.pdf"); // required
+for (const insuranceFile of insuranceFiles) {
+  // Use append: set() would replace the previous insurance document.
+  form.append("insurance", insuranceFile, insuranceFile.name);
+}
 
 // Shared stall: attach the second artist's fields + portfolio when sharingStall is "Yes".
 // (API `buddy*` names shown; the native Webflow `buddy-*` and legacy `second*` names work too.)
@@ -258,14 +262,11 @@ if (sharing) {
   form.set("buddyPortfolio", buddyPortfolioFile, "buddy-portfolio.pdf");
 }
 
-const res = await fetch(
-  "https://mellow-cf.mellowartmarket.workers.dev/api/submit",
-  {
-    method: "POST",
-    headers: { "X-Client-Key": process.env.CLIENT_KEY },
-    body: form, // do NOT set Content-Type — fetch sets the multipart boundary
-  },
-);
+const res = await fetch("https://mellow-cf.mellowartmarket.workers.dev/api/submit", {
+  method: "POST",
+  headers: { "X-Client-Key": process.env.CLIENT_KEY },
+  body: form, // do NOT set Content-Type — fetch sets the multipart boundary
+});
 
 const data = await res.json();
 if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);

@@ -61,13 +61,14 @@ computer.
 
 After login you see summary cards:
 
-| Card | Meaning |
-| --- | --- |
-| **Total inquiries** | All submissions ever received. |
-| **Pending review** | Waiting for your decision. |
-| **Accepted** | Accepted applicants. |
-| **Waitlisted** | Applicants kept on hold. |
-| **Rejected** | Declined applicants. |
+| Card                | Meaning                                     |
+| ------------------- | ------------------------------------------- |
+| **Total inquiries** | All submissions ever received.              |
+| **Pending review**  | Waiting for your decision.                  |
+| **Accepted**        | Accepted applicants.                        |
+| **Waitlisted**      | Applicants kept on hold.                    |
+| **Rejected**        | Declined applicants.                        |
+| **Withdrawn**       | Applicants whose application was withdrawn. |
 
 Use the sidebar to move between **Dashboard**, **Inquiries**, **Events**, and
 **Invoice settings**.
@@ -84,28 +85,35 @@ Each row has two **independent** status controls, plus the stall and invoice:
 
 **Application status** (a dropdown you can change at any time):
 
-| Status | What it means |
-| --- | --- |
-| **Pending** | New — needs your decision. |
-| **Accepted** | You accepted it. Unlocks the stall picker. |
-| **Waitlisted** | On hold; no email sent. |
-| **Rejected** | Declined (sends the rejection email). |
+| Status         | What it means                                             |
+| -------------- | --------------------------------------------------------- |
+| **Pending**    | New — needs your decision.                                |
+| **Accepted**   | You accepted it. Unlocks the stall picker.                |
+| **Waitlisted** | On hold; email can be sent separately.                    |
+| **Rejected**   | Declined; email can be sent separately.                   |
+| **Withdrawn**  | Removed from consideration; email can be sent separately. |
 
 **Payment status** (separate from the decision above):
 
-| Status | What it means |
-| --- | --- |
-| **Not sent** | No invoice created yet. |
-| **Invoicing** | Invoice is being created in Xero. |
-| **Awaiting payment** | Invoice sent, not yet paid. |
-| **Paid** | Invoice paid. |
-| **Overdue** | Invoice past its due date. |
-| **Voided** | Invoice cancelled. |
+| Status               | What it means                     |
+| -------------------- | --------------------------------- |
+| **Not sent**         | No invoice created yet.           |
+| **Invoicing**        | Invoice is being created in Xero. |
+| **Awaiting payment** | Invoice sent, not yet paid.       |
+| **Paid**             | Invoice paid.                     |
+| **Overdue**          | Invoice past its due date.        |
+| **Voided**           | Invoice cancelled.                |
 
 Other columns: **Stall assigned** (dropdown, only active once Accepted),
-**Invoice** (the *Send invoice* button / link), and a **Notes** icon (see
+**Invoice** (the _Send invoice_ button / link), and a **Notes** icon (see
 below). You can **filter by Application status, Payment status, or Event** and
-search by name/email to focus your work.
+search by name/email to focus your work. **Advanced search** also offers reference,
+categories, Instagram, website, internal notes, prior applications, and second
+artist fields. Use **Columns** to show or hide optional table fields.
+
+**Copy emails** copies addresses matching the current filters. **Export CSV**
+downloads the filtered records. **Backup data** downloads all submissions as a
+ZIP with CSV, HTML, and uploaded documents; filters are ignored.
 
 ### Viewing details
 
@@ -136,20 +144,30 @@ before the invoice:
 > them.
 
 **Requirements for invoicing to fully work:**
+
 - **Xero must be connected** (otherwise the invoice can't be created).
 - **Gmail must be connected** for the email to send. If Gmail is disconnected,
   the invoice still happens — only the email is skipped.
 
-### Waitlisting / Rejecting
+### Waitlisting / Rejecting / Withdrawing
 
-- Set **Application status** to **Waitlisted** to keep an applicant on hold (no
-  email is sent).
-- Set it to **Rejected** and **type a reason** (required) — the reason is
-  included in the email sent to the artist. The rejection email is best-effort:
-  if Gmail is disconnected or fails, the rejection is still recorded.
+- Set **Application status** to **Waitlisted** or **Rejected** to record the
+  decision. You can optionally include a reason.
+- Set it to **Withdrawn** when the applicant withdraws.
+- The **Email** button beside these statuses opens a confirmation before sending
+  the matching editable template. A status change alone never sends that email.
 
 > You can change the Application status at any time via the dropdown. Re-setting
-> a row to **Rejected** re-sends the rejection email.
+> a row to **Rejected** does not re-send the rejection email.
+
+### Bulk actions and deletion
+
+Select rows using the checkboxes in the table. You can apply one application
+status to the selected rows; review the confirmation dialog before applying it.
+Bulk status changes do not send emails. **Delete** permanently removes the
+selected submissions, their local invoice records, activity, notes, and uploaded
+files after confirmation. Invoices already issued in Xero remain in Xero. Back
+up the data before deleting if you may need it later.
 
 ### Internal notes
 
@@ -206,14 +224,14 @@ These defaults are applied to the single fee line on every generated invoice.
 Note there is **no price field here** — the price comes from the **stall**
 assigned to each applicant (configured per event under **Events**).
 
-| Field | What it is |
-| --- | --- |
-| **Item description** | Text shown on the invoice line (e.g. "Full table fee"). The assigned stall's tier name is appended automatically. |
-| **Currency** | 3-letter code, e.g. `AUD`, `USD`. Used only as a fallback if a stall has no currency. |
-| **Account code** | Your Xero account/ledger code the income posts to. |
-| **Due in (days)** | How many days from issue until the invoice is due. |
-| **Line amount types** | Whether the stall price is tax-inclusive, exclusive, or no-tax (matches Xero's options). |
-| **Tax type** | Xero tax code, chosen from a dropdown: **GST on Income (10%)**, **GST Free Income**, or **No GST**. |
+| Field                 | What it is                                                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Item description**  | Text shown on the invoice line (e.g. "Full table fee"). The assigned stall's tier name is appended automatically. |
+| **Currency**          | 3-letter code, e.g. `AUD`, `USD`. Used only as a fallback if a stall has no currency.                             |
+| **Account code**      | Your Xero account/ledger code the income posts to.                                                                |
+| **Due in (days)**     | How many days from issue until the invoice is due.                                                                |
+| **Line amount types** | Whether the stall price is tax-inclusive, exclusive, or no-tax (matches Xero's options).                          |
+| **Tax type**          | Xero tax code, chosen from a dropdown: **GST on Income (10%)**, **GST Free Income**, or **No GST**.               |
 
 Click **Save settings**. Changes apply to **future** invoices only — already-
 created invoices are not changed.
@@ -235,16 +253,16 @@ builds/maintains the form). As the admin, you only ever see the results in
 ## 7. Common questions
 
 **An artist says they didn't get the email.**
-Check **Invoice settings → Email (Gmail)** shows *Connected*. If it was
+Check **Invoice settings → Email (Gmail)** shows _Connected_. If it was
 disconnected at the time, the email was skipped — reconnect, then (for
 approvals) the invoice link is also visible in Xero so you can resend manually.
 
 **Invoice failed / no invoice was created.**
-Check **Invoice settings → Xero connection** shows *Connected*, that the row is
+Check **Invoice settings → Xero connection** shows _Connected_, that the row is
 **Accepted with a stall assigned**, then click **Send invoice** again.
 
 **The Send invoice button isn't showing.**
-A row must be **Accepted** *and* have a **stall assigned** first. If the stall
+A row must be **Accepted** _and_ have a **stall assigned** first. If the stall
 column says the event has no stalls, add them under **Events** for that event.
 
 **I set the wrong decision.**

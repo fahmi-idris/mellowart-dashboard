@@ -155,7 +155,10 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         </div>
         {events.length > 0 && (
           <Select value={eventId} onValueChange={setEventId}>
-            <SelectTrigger className="w-full sm:w-64">
+            <SelectTrigger
+              className="w-full sm:w-64"
+              aria-label="Filter dashboard by event"
+            >
               <SelectValue placeholder="Select event" />
             </SelectTrigger>
             <SelectContent>
