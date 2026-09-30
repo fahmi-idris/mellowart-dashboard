@@ -479,7 +479,7 @@ function useRowAction() {
   const fetcher = useFetcher<typeof action>();
   const queryClient = useQueryClient();
 
-  // Patch a row in every cached inquiries page right away.
+  // Keep the table and any already-loaded profile in sync during row edits.
   const patchRow = useCallback(
     (id: string, patch: Partial<Artist>) => {
       queryClient.setQueriesData<Paginated<Artist>>({ queryKey: ["inquiries"] }, (old) =>
@@ -489,6 +489,9 @@ function useRowAction() {
               data: old.data.map((r) => (r.id === id ? { ...r, ...patch } : r)),
             }
           : old,
+      );
+      queryClient.setQueryData<ArtistDetail>(["inquiry", id], (old) =>
+        old ? { ...old, ...patch } : old,
       );
     },
     [queryClient],
@@ -519,13 +522,11 @@ function useRowAction() {
     if (fetcher.state !== "idle" || !fetcher.data) return;
     if (fetcher.data.ok) {
       toast.success(fetcher.data.message);
-      if ("notes" in fetcher.data) {
+      if ("notes" in fetcher.data && typeof fetcher.data.id === "string") {
         // The action returns the saved value. Keep the optimistic list row in
         // place instead of replacing it with a possibly older list refetch.
         const { id, notes } = fetcher.data;
-        queryClient.setQueryData<ArtistDetail>(["inquiry", id], (old) =>
-          old ? { ...old, internalNotes: notes ?? null } : old,
-        );
+        patchRow(id, { internalNotes: notes ?? null });
       } else {
         queryClient.invalidateQueries({ queryKey: ["inquiries"] });
         queryClient.invalidateQueries({ queryKey: ["inquiry"] });
@@ -535,8 +536,9 @@ function useRowAction() {
       toast.error(fetcher.data.message);
       // Reconcile failed optimistic changes even if the row was unmounted.
       queryClient.invalidateQueries({ queryKey: ["inquiries"] });
+      queryClient.invalidateQueries({ queryKey: ["inquiry"] });
     }
-  }, [fetcher.state, fetcher.data, queryClient]);
+  }, [fetcher.state, fetcher.data, patchRow, queryClient]);
 
   return { fetcher, submit, patchRow, removeRow };
 }
@@ -1715,6 +1717,9 @@ function ViewProfileDialog({
   const hasSecondArtist = Boolean(
     data && (secondName || data.secondEmail || data.secondBrandName || secondPortfolio.length),
   );
+  // The list row is patched on Save; the detail request may still be in flight
+  // and return the previous note, so prefer the row's current note here.
+  const internalNotes = artist.internalNotes;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1785,7 +1790,7 @@ function ViewProfileDialog({
             </ProfileSection>
 
             {(data.additionalNotes ||
-              data.internalNotes ||
+              internalNotes ||
               data.rejectReason ||
               data.waitlistReason) && (
               <ProfileSection title="Notes & decision">
@@ -1793,9 +1798,7 @@ function ViewProfileDialog({
                   {data.additionalNotes && (
                     <Detail label="Additional notes" value={data.additionalNotes} />
                   )}
-                  {data.internalNotes && (
-                    <Detail label="Internal notes" value={data.internalNotes} />
-                  )}
+                  {internalNotes && <Detail label="Internal notes" value={internalNotes} />}
                   {data.rejectReason && (
                     <Detail label="Rejection reason" value={data.rejectReason} />
                   )}
