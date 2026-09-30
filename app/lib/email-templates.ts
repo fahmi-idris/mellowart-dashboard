@@ -210,6 +210,7 @@ export function newBlock(type: BlockType): EmailBlock {
 export interface EmailBranding {
   fromName: string;
   logoUrl: string;
+  headerLogoWidth: number | null;
   brandColor: string; // dark brand / hero background
   accentColor: string; // pill / highlight
   buttonColor: string;
@@ -222,12 +223,20 @@ export interface EmailBranding {
   instagramUrl: string;
   facebookUrl: string;
   tiktokUrl: string;
+  socialLinks: SocialLink[];
+}
+
+export interface SocialLink {
+  id: string;
+  label: string;
+  url: string;
 }
 
 export const DEFAULT_BRANDING: EmailBranding = {
   fromName: "Mellow Art",
   logoUrl:
     "https://cdn.prod.website-files.com/6a223b24e44ab35ad710d94d/6a223b24e44ab35ad710d9a3_image%2030.webp",
+  headerLogoWidth: null,
   brandColor: "#2C2422",
   accentColor: "#F2C4CE",
   buttonColor: "#2C2422",
@@ -242,7 +251,49 @@ export const DEFAULT_BRANDING: EmailBranding = {
   instagramUrl: "https://www.instagram.com/mellowartmarket/",
   facebookUrl: "https://www.facebook.com/mellowartmarket",
   tiktokUrl: "https://www.tiktok.com/@mellowartmarket",
+  socialLinks: [
+    { id: "website", label: "Website", url: "https://www.mellowart.com.au" },
+    { id: "instagram", label: "Instagram", url: "https://www.instagram.com/mellowartmarket/" },
+    { id: "facebook", label: "Facebook", url: "https://www.facebook.com/mellowartmarket" },
+    { id: "tiktok", label: "TikTok", url: "https://www.tiktok.com/@mellowartmarket" },
+  ],
 };
+
+/** Populate new branding fields when reading older global/event settings. */
+export function normalizeEmailBranding(raw: Partial<EmailBranding>): EmailBranding {
+  const branding = { ...DEFAULT_BRANDING, ...raw };
+  return {
+    ...branding,
+    headerLogoWidth:
+      typeof raw.headerLogoWidth === "number" && Number.isFinite(raw.headerLogoWidth)
+        ? Math.max(80, Math.min(320, raw.headerLogoWidth))
+        : null,
+    socialLinks: Array.isArray(raw.socialLinks)
+      ? raw.socialLinks
+          .filter(
+            (link): link is SocialLink =>
+              link !== null &&
+              typeof link === "object" &&
+              typeof link.label === "string" &&
+              typeof link.url === "string",
+          )
+          .map((link, index) => ({
+            id: typeof link.id === "string" && link.id ? link.id : `social-${index}`,
+            label: link.label,
+            url: link.url,
+          }))
+      : (
+          [
+            ["website", "Website", branding.websiteUrl],
+            ["instagram", "Instagram", branding.instagramUrl],
+            ["facebook", "Facebook", branding.facebookUrl],
+            ["tiktok", "TikTok", branding.tiktokUrl],
+          ] as const
+        )
+          .filter(([, , url]) => url)
+          .map(([id, label, url]) => ({ id, label, url })),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Merge tags — per template, with sample values used for preview / test sends.
@@ -255,10 +306,10 @@ export interface MergeTag {
 }
 
 const COMMON_TAGS: MergeTag[] = [
-  { tag: "name", label: "Full name", sample: "Ada Lovelace" },
-  { tag: "firstName", label: "First name", sample: "Ada" },
-  { tag: "lastName", label: "Last name", sample: "Lovelace" },
-  { tag: "email", label: "Email", sample: "ada@example.com" },
+  { tag: "name", label: "Full name", sample: "John Doe" },
+  { tag: "firstName", label: "First name", sample: "John" },
+  { tag: "lastName", label: "Last name", sample: "Doe" },
+  { tag: "email", label: "Email", sample: "john@example.com" },
   { tag: "reference", label: "Submission reference", sample: "ART-9F3AB2C1" },
 ];
 

@@ -9,26 +9,26 @@
  * Gmail REST API over HTTPS.
  */
 
-import {
-  getGoogleTokens,
-  saveGoogleTokens,
-  type GoogleTokenRow,
-} from "~/lib/google-tokens.server";
+import { getGoogleTokens, saveGoogleTokens, type GoogleTokenRow } from "~/lib/google-tokens.server";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const SEND_URL =
-  "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+const SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 
 /** `gmail.send` to send; `openid email` so we can record the From address. */
-export const GOOGLE_SCOPES =
-  "openid email https://www.googleapis.com/auth/gmail.send";
+export const GOOGLE_SCOPES = "openid email https://www.googleapis.com/auth/gmail.send";
+const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+
+export function hasGmailSendScope(scopes: string | undefined): boolean {
+  return scopes?.split(/\s+/).includes(GMAIL_SEND_SCOPE) ?? false;
+}
 
 interface TokenResponse {
   access_token: string;
   expires_in: number;
   refresh_token?: string;
   id_token?: string;
+  scope?: string;
 }
 
 /** Build the Google consent URL. `access_type=offline` + `prompt=consent`
@@ -88,9 +88,7 @@ export function emailFromIdToken(idToken: string | undefined): string | null {
     const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
     const pad = b64.length % 4 ? "=".repeat(4 - (b64.length % 4)) : "";
     const json = JSON.parse(
-      new TextDecoder().decode(
-        Uint8Array.from(atob(b64 + pad), (c) => c.charCodeAt(0)),
-      ),
+      new TextDecoder().decode(Uint8Array.from(atob(b64 + pad), (c) => c.charCodeAt(0))),
     ) as { email?: string };
     return json.email ?? null;
   } catch {
@@ -102,9 +100,7 @@ export function emailFromIdToken(idToken: string | undefined): string | null {
  * Valid access token + From address, refreshing when within 60s of expiry and
  * persisting the result. Throws when the app has never been connected.
  */
-async function getValidAccessToken(
-  env: Env,
-): Promise<{ token: string; email: string }> {
+async function getValidAccessToken(env: Env): Promise<{ token: string; email: string }> {
   const row = await getGoogleTokens(env.DB);
   if (!row) throw new Error("Gmail is not connected — authorize it first.");
   if (row.expiresAt > Date.now() + 60_000) {
@@ -151,9 +147,7 @@ export interface OutgoingEmail {
 /** Send one HTML email as the connected mailbox. Throws on API failure. */
 export async function sendEmail(env: Env, msg: OutgoingEmail): Promise<void> {
   const { token, email } = await getValidAccessToken(env);
-  const from = msg.fromName
-    ? `${encodeHeader(msg.fromName)} <${email}>`
-    : email;
+  const from = msg.fromName ? `${encodeHeader(msg.fromName)} <${email}>` : email;
 
   const mime = [
     `From: ${from}`,
@@ -174,6 +168,12 @@ export async function sendEmail(env: Env, msg: OutgoingEmail): Promise<void> {
     body: JSON.stringify({ raw: base64Url(mime) }),
   });
   if (!res.ok) {
-    throw new Error(`Gmail send failed: ${res.status} ${await res.text()}`);
+    const detail = await res.text();
+    if (res.status === 403 && detail.includes("ACCESS_TOKEN_SCOPE_INSUFFICIENT")) {
+      throw new Error(
+        "Gmail has not granted permission to send email. Go to Invoice settings, select Reconnect, and allow the Gmail send permission on Google's consent screen.",
+      );
+    }
+    throw new Error(`Gmail send failed: ${res.status} ${detail}`);
   }
 }

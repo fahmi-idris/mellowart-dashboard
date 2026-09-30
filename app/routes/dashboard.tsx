@@ -2,18 +2,12 @@ import { env } from "cloudflare:workers";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { ArrowRight } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react";
 
 import type { Route } from "./+types/dashboard";
 import { Button } from "~/components/ui/button";
 import { Donut, Sparkline, TrendChart } from "~/components/charts";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "~/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -25,11 +19,7 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { requireAdmin } from "~/lib/auth.server";
 import { listEventsWithCounts } from "~/lib/events.server";
 import { activityDot, formatRelative, type ActivityItem } from "~/lib/activity";
-import {
-  APPLICATION_LABEL,
-  applicationToneClass,
-  type ApplicationStatus,
-} from "~/lib/status";
+import { APPLICATION_LABEL, applicationToneClass, type ApplicationStatus } from "~/lib/status";
 import { cn } from "~/lib/utils";
 
 export function meta(_: Route.MetaArgs) {
@@ -121,7 +111,12 @@ function DeltaBadge({ delta, invert }: { delta: number | null; invert?: boolean 
           : "bg-red-50 text-red-600 dark:bg-red-950/40",
       )}
     >
-      {up ? "↑" : "↓"} {Math.abs(delta)}%
+      {up ? (
+        <ArrowUp className="inline size-3.5" aria-hidden="true" />
+      ) : (
+        <ArrowDown className="inline size-3.5" aria-hidden="true" />
+      )}{" "}
+      {Math.abs(delta)}%
     </span>
   );
 }
@@ -155,10 +150,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         </div>
         {events.length > 0 && (
           <Select value={eventId} onValueChange={setEventId}>
-            <SelectTrigger
-              className="w-full sm:w-64"
-              aria-label="Filter dashboard by event"
-            >
+            <SelectTrigger className="w-full sm:w-64" aria-label="Filter dashboard by event">
               <SelectValue placeholder="Select event" />
             </SelectTrigger>
             <SelectContent>
@@ -183,7 +175,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                   <Skeleton className="h-9 w-14" />
                 ) : (
                   <CardTitle className="text-3xl tabular-nums">
-                    {isError ? "—" : data?.counts[c.key] ?? 0}
+                    {isError ? "—" : (data?.counts[c.key] ?? 0)}
                   </CardTitle>
                 )}
                 {!isPending && !isError && data && (
@@ -237,10 +229,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                 <Donut segments={segments} total={data?.counts.total ?? 0} />
                 <div className="flex w-full flex-col gap-2">
                   {data?.breakdown.map((b) => (
-                    <div
-                      key={b.key}
-                      className="flex items-center justify-between text-sm"
-                    >
+                    <div key={b.key} className="flex items-center justify-between text-sm">
                       <span className="flex items-center gap-2 text-muted-foreground">
                         <span
                           className="size-2.5 rounded-full"
@@ -276,9 +265,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
             {isPending ? (
               <Skeleton className="h-40 w-full" />
             ) : (data?.recentSubmissions.length ?? 0) === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No submissions yet.
-              </p>
+              <p className="py-8 text-center text-sm text-muted-foreground">No submissions yet.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -296,9 +283,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                       const paid = s.paymentStatus === "paid";
                       return (
                         <tr key={s.id} className="border-t">
-                          <td className="py-2 font-mono text-xs text-muted-foreground">
-                            {s.id}
-                          </td>
+                          <td className="py-2 font-mono text-xs text-muted-foreground">{s.id}</td>
                           <td className="py-2 font-medium">{s.name}</td>
                           <td className="py-2">
                             <span
@@ -310,9 +295,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                               {APPLICATION_LABEL[s.status]}
                             </span>
                           </td>
-                          <td className="py-2 text-muted-foreground">
-                            {s.stallTier ?? "—"}
-                          </td>
+                          <td className="py-2 text-muted-foreground">{s.stallTier ?? "—"}</td>
                           <td className="py-2">
                             <span
                               className={cn(
@@ -348,9 +331,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                 ))}
               </div>
             ) : (data?.recentActivity.length ?? 0) === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No activity yet.
-              </p>
+              <p className="py-8 text-center text-sm text-muted-foreground">No activity yet.</p>
             ) : (
               <ul className="flex flex-col gap-4">
                 {data?.recentActivity.map((a) => (
@@ -368,9 +349,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                       ) : (
                         <p className="text-sm leading-snug">{a.message}</p>
                       )}
-                      <p className="text-xs text-muted-foreground">
-                        {formatRelative(a.createdAt)}
-                      </p>
+                      <p className="text-xs text-muted-foreground">{formatRelative(a.createdAt)}</p>
                     </div>
                   </li>
                 ))}

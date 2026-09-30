@@ -20,6 +20,14 @@ export interface EventWithCounts extends EventSummary {
   awaitingReview: number;
 }
 
+/** An event can have templates while it is upcoming or has not ended. */
+export function isEventAvailableForTemplates(
+  event: Pick<EventSummary, "endsAt">,
+  today = new Date().toISOString().slice(0, 10),
+): boolean {
+  return !event.endsAt || event.endsAt.slice(0, 10) >= today;
+}
+
 export interface StallOption {
   id: string;
   eventId: string;

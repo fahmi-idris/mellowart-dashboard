@@ -212,20 +212,22 @@ admins
 
 ### Tables
 
-| Table               | Responsibility                                                                                |
-| ------------------- | --------------------------------------------------------------------------------------------- |
-| `admins`            | Admin identity, name, email, and PBKDF2 password hash                                         |
-| `submissions`       | Artist form data, workflow states, event/stall assignment, invoice link, notes, archive state |
-| `submission_images` | R2 key, document kind, content type, size, and order                                          |
-| `events`            | Local event identity, dates, location, slug, and optional Webflow item ID                     |
-| `stall_options`     | Event-specific stall tier, slug, price, currency, furniture, frontage, and sharing rules      |
-| `invoice_settings`  | Default Xero invoice and bank/payment configuration                                           |
-| `invoices`          | Created Xero invoice snapshots and statuses                                                   |
-| `xero_tokens`       | Singleton Xero OAuth token record                                                             |
-| `google_tokens`     | Singleton Google OAuth token record                                                           |
-| `activity_log`      | Auditable administrator workflow actions                                                      |
-| `email_templates`   | Admin-editable email subject and content blocks                                               |
-| `email_branding`    | Singleton shared email branding configuration                                                 |
+| Table                   | Responsibility                                                                                |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| `admins`                | Admin identity, name, email, and PBKDF2 password hash                                         |
+| `submissions`           | Artist form data, workflow states, event/stall assignment, invoice link, notes, archive state |
+| `submission_images`     | R2 key, document kind, content type, size, and order                                          |
+| `events`                | Local event identity, dates, location, slug, and optional Webflow item ID                     |
+| `stall_options`         | Event-specific stall tier, slug, price, currency, furniture, frontage, and sharing rules      |
+| `invoice_settings`      | Default Xero invoice and bank/payment configuration                                           |
+| `invoices`              | Created Xero invoice snapshots and statuses                                                   |
+| `xero_tokens`           | Singleton Xero OAuth token record                                                             |
+| `google_tokens`         | Singleton Google OAuth token record                                                           |
+| `activity_log`          | Auditable administrator workflow actions                                                      |
+| `email_templates`       | Legacy/global email subjects and content blocks; fallback for events without an override      |
+| `email_branding`        | Legacy/global email branding; fallback for events without an override                         |
+| `event_email_templates` | Per-event subjects, preheaders, and content blocks for each email outcome                     |
+| `event_email_branding`  | Per-event branding shared by that event's email templates                                     |
 
 ### Schema changes
 

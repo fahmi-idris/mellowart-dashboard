@@ -11,6 +11,17 @@ import {
 } from "lucide-react";
 import { Form, Link, useLocation } from "react-router";
 
+import { Button } from "~/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "~/components/ui/dialog";
 import {
   Sidebar,
   SidebarContent,
@@ -35,7 +46,13 @@ const nav = [
   { title: "Email templates", url: "/email-templates", icon: Mail },
 ];
 
-export function AppSidebar({ email }: { email?: string }) {
+export function AppSidebar({
+  email,
+  hasTemplateEvent,
+}: {
+  email?: string;
+  hasTemplateEvent: boolean;
+}) {
   const { pathname } = useLocation();
 
   return (
@@ -50,9 +67,7 @@ export function AppSidebar({ email }: { email?: string }) {
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">Mellow Admin</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    Applications
-                  </span>
+                  <span className="truncate text-xs text-muted-foreground">Applications</span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -67,6 +82,30 @@ export function AppSidebar({ email }: { email?: string }) {
             <SidebarMenu>
               {nav.map((item) => {
                 const Icon = item.icon;
+                if (item.url === "/email-templates" && !hasTemplateEvent) {
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton
+                        disabled
+                        tooltip="Create a current or upcoming event first"
+                        title="Create a current or upcoming event first"
+                      >
+                        <Icon />
+                        <span>{item.title}</span>
+                      </SidebarMenuButton>
+                      <p className="px-2 py-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+                        Create a current or upcoming event in{" "}
+                        <Link
+                          to="/events"
+                          className="underline underline-offset-2 hover:text-foreground"
+                        >
+                          Events
+                        </Link>{" "}
+                        to edit email templates.
+                      </p>
+                    </SidebarMenuItem>
+                  );
+                }
                 return (
                   <SidebarMenuItem key={item.url}>
                     <SidebarMenuButton
@@ -97,16 +136,32 @@ export function AppSidebar({ email }: { email?: string }) {
             </SidebarMenuItem>
           ) : null}
           <SidebarMenuItem>
-            <Form method="post" action="/logout" className="w-full">
-              <SidebarMenuButton
-                type="submit"
-                tooltip="Sign out"
-                className="w-full"
-              >
-                <LogOut />
-                <span>Sign out</span>
-              </SidebarMenuButton>
-            </Form>
+            <Dialog>
+              <DialogTrigger asChild>
+                <SidebarMenuButton type="button" tooltip="Sign out" className="w-full">
+                  <LogOut />
+                  <span>Sign out</span>
+                </SidebarMenuButton>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Sign out?</DialogTitle>
+                  <DialogDescription>
+                    You’ll need to sign in again to access the dashboard.
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button variant="outline">Cancel</Button>
+                  </DialogClose>
+                  <Form method="post" action="/logout">
+                    <Button type="submit" className="w-full sm:w-auto">
+                      <LogOut className="size-4" /> Sign out
+                    </Button>
+                  </Form>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

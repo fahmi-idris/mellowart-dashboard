@@ -5,13 +5,7 @@ import { toast } from "sonner";
 
 import type { Route } from "./+types/invoice-settings";
 import { Button } from "~/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "~/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import {
@@ -23,10 +17,7 @@ import {
 } from "~/components/ui/select";
 import { requireAdmin } from "~/lib/auth.server";
 import { LINE_AMOUNT_TYPES, TAX_TYPES } from "~/lib/invoices";
-import {
-  getInvoiceSettings,
-  updateInvoiceSettings,
-} from "~/lib/invoices.server";
+import { getInvoiceSettings, updateInvoiceSettings } from "~/lib/invoices.server";
 import { getGoogleTokens } from "~/lib/google-tokens.server";
 import { getXeroTokens } from "~/lib/xero-tokens.server";
 
@@ -58,7 +49,9 @@ export async function action({ request }: Route.ActionArgs) {
   await requireAdmin(request);
   const form = await request.formData();
 
-  const currency = String(form.get("currency") ?? "").trim().toUpperCase();
+  const currency = String(form.get("currency") ?? "")
+    .trim()
+    .toUpperCase();
   const accountCode = String(form.get("accountCode") ?? "").trim();
   const itemDescription = String(form.get("itemDescription") ?? "").trim();
   const lineAmountTypes = String(form.get("lineAmountTypes") ?? "");
@@ -104,10 +97,7 @@ export async function action({ request }: Route.ActionArgs) {
   return { ok: true, message: "Invoice settings saved." };
 }
 
-export default function InvoiceSettings({
-  loaderData,
-  actionData,
-}: Route.ComponentProps) {
+export default function InvoiceSettings({ loaderData, actionData }: Route.ComponentProps) {
   const { settings, xero, google } = loaderData;
   const navigation = useNavigation();
   const busy = navigation.state !== "idle";
@@ -125,6 +115,8 @@ export default function InvoiceSettings({
       if (status === "connected") toast.success(`${label} connected.`);
       else if (status === "disconnected") toast.success(`${label} disconnected.`);
       else if (status === "error") toast.error(`${label} connection failed.`);
+      else if (status === "scope")
+        toast.error("Gmail send permission was not granted. Reconnect and allow email sending.");
     };
     const xeroStatus = searchParams.get("xero");
     const googleStatus = searchParams.get("google");
@@ -144,9 +136,7 @@ export default function InvoiceSettings({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Invoice settings
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Invoice settings</h1>
         <p className="text-sm text-muted-foreground">
           Defaults forwarded to Xero when an approved submission is invoiced.
         </p>
@@ -156,8 +146,8 @@ export default function InvoiceSettings({
         <CardHeader>
           <CardTitle>Xero connection</CardTitle>
           <CardDescription>
-            Invoices can only be created while connected. Authorizing opens
-            Xero's consent screen, then returns here.
+            Invoices can only be created while connected. Authorizing opens Xero's consent screen,
+            then returns here.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-between gap-4">
@@ -166,10 +156,7 @@ export default function InvoiceSettings({
               <p>
                 <span className="font-medium text-foreground">Connected</span>
                 {xero.tenantName ? (
-                  <span className="text-muted-foreground">
-                    {" "}
-                    · {xero.tenantName}
-                  </span>
+                  <span className="text-muted-foreground"> · {xero.tenantName}</span>
                 ) : null}
               </p>
             ) : (
@@ -201,9 +188,8 @@ export default function InvoiceSettings({
         <CardHeader>
           <CardTitle>Email (Gmail)</CardTitle>
           <CardDescription>
-            Sends approval emails (with the invoice link) from your Google
-            Workspace mailbox. Approval still works while disconnected — the
-            email is just skipped.
+            Sends approval emails (with the invoice link) from your Google Workspace mailbox.
+            Approval still works while disconnected — the email is just skipped.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-between gap-4">
@@ -285,10 +271,7 @@ export default function InvoiceSettings({
             <div className="grid gap-5 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="lineAmountTypes">Line amount types</Label>
-                <Select
-                  name="lineAmountTypes"
-                  defaultValue={settings.lineAmountTypes}
-                >
+                <Select name="lineAmountTypes" defaultValue={settings.lineAmountTypes}>
                   <SelectTrigger id="lineAmountTypes">
                     <SelectValue />
                   </SelectTrigger>
@@ -303,10 +286,7 @@ export default function InvoiceSettings({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="taxType">Tax type</Label>
-                <Select
-                  name="taxType"
-                  defaultValue={settings.taxType ?? TAX_TYPES[0].value}
-                >
+                <Select name="taxType" defaultValue={settings.taxType ?? TAX_TYPES[0].value}>
                   <SelectTrigger id="taxType">
                     <SelectValue />
                   </SelectTrigger>
@@ -339,8 +319,8 @@ export default function InvoiceSettings({
             <div className="border-t pt-5">
               <h3 className="text-sm font-medium">Bank transfer (EFT) details</h3>
               <p className="mb-4 text-sm text-muted-foreground">
-                Shown as the manual "pay by bank transfer" option on the approval
-                email. Leave blank to hide that option.
+                Shown as the manual "pay by bank transfer" option on the approval email. Leave blank
+                to hide that option.
               </p>
               <div className="grid gap-5">
                 <div className="grid gap-2">
@@ -373,9 +353,7 @@ export default function InvoiceSettings({
                   </div>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="confirmationFormUrl">
-                    Payment confirmation form URL
-                  </Label>
+                  <Label htmlFor="confirmationFormUrl">Payment confirmation form URL</Label>
                   <Input
                     id="confirmationFormUrl"
                     name="confirmationFormUrl"

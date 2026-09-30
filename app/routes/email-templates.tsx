@@ -1,26 +1,48 @@
 import { env } from "cloudflare:workers";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { useBlocker, useFetcher } from "react-router";
+import { createRoot } from "react-dom/client";
+import { data, Link, useBlocker, useFetcher, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import {
   ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
+  Check,
   ChevronDown,
+  ChevronRight,
+  Clock3,
   Copy,
   Eye,
   GripVertical,
+  Heading,
+  Image as ImageIcon,
+  List,
   Loader2,
+  Minus,
+  MousePointerClick,
   Palette,
   Plus,
+  ReceiptText,
+  Redo2,
+  RotateCcw,
   Send,
+  Smartphone,
+  Tag,
   Trash2,
+  Type,
+  Undo2,
   Upload,
+  X,
+  Zap,
 } from "lucide-react";
 
 import type { Route } from "./+types/email-templates";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
+import { Card } from "~/components/ui/card";
+import { Checkbox } from "~/components/ui/checkbox";
+import { Slider } from "~/components/ui/slider";
 import {
   Dialog,
   DialogContent,
@@ -29,12 +51,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "~/components/ui/dropdown-menu";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import {
@@ -44,14 +60,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "~/components/ui/sheet";
-import { useSidebar } from "~/components/ui/sidebar";
 import { Textarea } from "~/components/ui/textarea";
 import { requireAdmin } from "~/lib/auth.server";
 import { uploadEmailAsset } from "~/lib/email-assets.server";
@@ -63,6 +71,7 @@ import {
   type EmailBlock,
   type EmailBranding,
   MERGE_TAGS,
+  normalizeEmailBranding,
   newBlock,
   reorderEmailBlocks,
   sampleContext,
@@ -76,12 +85,15 @@ import {
   getAllTemplates,
   getBranding,
   isTemplateKey,
+  publishEventTemplate,
   renderContent,
   saveTemplate,
-  updateBranding,
 } from "~/lib/email-templates.server";
 import { getGoogleTokens } from "~/lib/google-tokens.server";
 import { formatDueDate, getInvoiceSettings } from "~/lib/invoices.server";
+import { getEvent, listEventsWithCounts } from "~/lib/events.server";
+import { isEventAvailableForTemplates, type EventWithCounts } from "~/lib/events";
+import { cn } from "~/lib/utils";
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Email templates · Mellow" }];
@@ -100,19 +112,95 @@ const BLOCK_TYPES: BlockType[] = [
   "spacer",
 ];
 
-export async function loader({ request }: Route.LoaderArgs) {
+const TEMPLATE_ICONS = {
+  approval: Check,
+  confirmation: Clock3,
+  rejection: X,
+  waitlist: Clock3,
+  withdrawn: RotateCcw,
+} as const;
+
+const TEMPLATE_OUTCOMES: Record<TemplateKey, { name: string; sub: string; tone: string }> = {
+  approval: { name: "Approved", sub: "Welcome & next steps", tone: "bg-green-100 text-green-700" },
+  confirmation: {
+    name: "Pending",
+    sub: "Application received",
+    tone: "bg-stone-100 text-stone-600",
+  },
+  rejection: { name: "Rejected", sub: "A thoughtful update", tone: "bg-red-100 text-red-600" },
+  waitlist: {
+    name: "Waitlist",
+    sub: "Keep the possibility open",
+    tone: "bg-amber-100 text-amber-700",
+  },
+  withdrawn: {
+    name: "Withdrawn",
+    sub: "Confirmation & next steps",
+    tone: "bg-violet-100 text-violet-700",
+  },
+};
+
+const BLOCK_ICONS = {
+  hero: Tag,
+  image: ImageIcon,
+  heading: Heading,
+  paragraph: Type,
+  list: List,
+  button: MousePointerClick,
+  summary: ReceiptText,
+  bank: ReceiptText,
+  divider: Minus,
+  spacer: Minus,
+} as const;
+
+async function loadEmailTemplateData(request: Request, eventSlug?: string) {
   await requireAdmin(request);
+  const allEvents = await listEventsWithCounts(env.DB);
+  const events = allEvents.filter((event) => isEventAvailableForTemplates(event));
+  const requestedEventId = new URL(request.url).searchParams.get("event");
+  const event = eventSlug
+    ? (events.find((item) => item.slug === eventSlug) ?? null)
+    : (events.find((item) => item.id === requestedEventId) ?? events[0] ?? null);
   const [templates, branding, google] = await Promise.all([
-    getAllTemplates(env.DB),
-    getBranding(env.DB),
+    getAllTemplates(env.DB, event?.id),
+    getBranding(env.DB, event?.id),
     getGoogleTokens(env.DB),
   ]);
   return {
+    events,
+    event,
     templates,
     branding,
-    gmail: { connected: google !== null, email: google?.email ?? null },
+    thumbnails: Object.fromEntries(
+      TEMPLATE_KEYS.map((key) => [
+        key,
+        renderContent(templates[key], branding, {
+          ...sampleContext(key),
+          eventName: event?.name ?? "",
+        }).html,
+      ]),
+    ) as Record<TemplateKey, string>,
+    gmail: {
+      configured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+      connected: google !== null,
+      email: google?.email ?? null,
+    },
   };
 }
+
+export async function loader({ request, params }: Route.LoaderArgs) {
+  const eventSlug = params.eventSlug;
+  const templateKey = params.templateKey;
+  if (eventSlug && !isTemplateKey(templateKey ?? ""))
+    throw data("Template not found", { status: 404 });
+  const result = await loadEmailTemplateData(request, eventSlug);
+  if (eventSlug && !result.event)
+    throw data("Event not found or no longer active", { status: 404 });
+  return { ...result, detailKey: eventSlug ? (templateKey as TemplateKey) : null };
+}
+
+export const templateDetailPath = (eventSlug: string, key: TemplateKey) =>
+  `/email-templates/${encodeURIComponent(eventSlug)}/${key}`;
 
 function parseContent(form: FormData): TemplateContent {
   const blocks = JSON.parse(String(form.get("blocks") ?? "[]")) as unknown;
@@ -124,34 +212,18 @@ function parseContent(form: FormData): TemplateContent {
   };
 }
 
-function brandingFromForm(form: FormData): EmailBranding {
-  const s = (k: string) => String(form.get(k) ?? "").trim();
-  return {
-    fromName: s("fromName"),
-    logoUrl: s("logoUrl"),
-    brandColor: s("brandColor"),
-    accentColor: s("accentColor"),
-    buttonColor: s("buttonColor"),
-    headerBg: s("headerBg"),
-    footerBg: s("footerBg"),
-    footerLogoUrl: s("footerLogoUrl"),
-    footerText: String(form.get("footerText") ?? ""),
-    contactEmail: s("contactEmail"),
-    websiteUrl: s("websiteUrl"),
-    instagramUrl: s("instagramUrl"),
-    facebookUrl: s("facebookUrl"),
-    tiktokUrl: s("tiktokUrl"),
-  };
-}
-
 /**
  * Merge context for previews / test sends. Starts from the sample values, then
  * — for the approval email — overlays the real saved invoice settings (bank
  * details, confirmation form, payment due date) so the preview faithfully shows
  * what recipients actually receive rather than placeholders.
  */
-async function previewContext(key: TemplateKey): Promise<Record<string, string>> {
+async function previewContext(
+  key: TemplateKey,
+  eventName: string,
+): Promise<Record<string, string>> {
   const ctx = sampleContext(key);
+  ctx.eventName = eventName;
   if (key === "approval") {
     const s = await getInvoiceSettings(env.DB);
     ctx.bankAccountName = s.bankAccountName ?? "";
@@ -183,6 +255,10 @@ export async function action({ request }: Route.ActionArgs) {
       };
     }
 
+    const eventId = String(form.get("eventId") ?? "");
+    const event = eventId ? await getEvent(env.DB, eventId) : null;
+    if (!event) return { ok: false, message: "Choose an event before editing templates." };
+
     if (intent === "preview") {
       const key = String(form.get("key") ?? "");
       if (!isTemplateKey(key)) return { ok: false, message: "Unknown template." };
@@ -190,8 +266,8 @@ export async function action({ request }: Route.ActionArgs) {
       const brandingJson = form.get("branding");
       const branding = brandingJson
         ? (JSON.parse(String(brandingJson)) as EmailBranding)
-        : await getBranding(env.DB);
-      const rendered = renderContent(content, branding, await previewContext(key), {
+        : await getBranding(env.DB, eventId);
+      const rendered = renderContent(content, branding, await previewContext(key, event.name), {
         includeBlockMarkers: true,
       });
       return {
@@ -207,21 +283,33 @@ export async function action({ request }: Route.ActionArgs) {
       if (!isTemplateKey(key)) return { ok: false, message: "Unknown template." };
       const content = parseContent(form);
       if (!content.subject.trim()) return { ok: false, message: "Subject can't be empty." };
-      await saveTemplate(env.DB, key, content, session.email);
+      await saveTemplate(env.DB, key, content, session.email, eventId);
       return { ok: true, message: `Saved “${TEMPLATE_META[key].label}”.` };
     }
 
-    if (intent === "save_branding") {
-      await updateBranding(env.DB, brandingFromForm(form));
-      return { ok: true, message: "Branding saved." };
+    if (intent === "publish_template") {
+      const key = String(form.get("key") ?? "");
+      if (!isTemplateKey(key)) return { ok: false, message: "Unknown template." };
+      const content = parseContent(form);
+      if (!content.subject.trim()) return { ok: false, message: "Subject can't be empty." };
+      const rawBranding = JSON.parse(
+        String(form.get("branding") ?? "null"),
+      ) as EmailBranding | null;
+      if (!rawBranding) return { ok: false, message: "Brand style is missing." };
+      const branding = normalizeEmailBranding(rawBranding);
+      await publishEventTemplate(env.DB, eventId, key, content, branding, session.email);
+      return { ok: true, message: `Published “${TEMPLATE_META[key].label}” for ${event.name}.` };
     }
 
     if (intent === "send_test") {
       const key = String(form.get("key") ?? "");
       if (!isTemplateKey(key)) return { ok: false, message: "Unknown template." };
       const content = parseContent(form);
-      const branding = await getBranding(env.DB);
-      const rendered = renderContent(content, branding, await previewContext(key));
+      const brandingJson = form.get("branding");
+      const branding = brandingJson
+        ? (JSON.parse(String(brandingJson)) as EmailBranding)
+        : await getBranding(env.DB, eventId);
+      const rendered = renderContent(content, branding, await previewContext(key, event.name));
       await sendEmail(env, {
         to: session.email,
         subject: `[TEST] ${rendered.subject}`,
@@ -245,8 +333,99 @@ export async function action({ request }: Route.ActionArgs) {
 // ---------------------------------------------------------------------------
 
 export default function EmailTemplates({ loaderData }: Route.ComponentProps) {
-  const { templates, branding: initialBranding, gmail } = loaderData;
-  const [selected, setSelected] = useState<TemplateKey>(TEMPLATE_KEYS[0]);
+  const { events, event, templates, branding, thumbnails, gmail, detailKey } = loaderData;
+  const [, setSearchParams] = useSearchParams();
+  if (detailKey && event) {
+    return (
+      <EventTemplateWorkspace
+        key={`${event.id}:${detailKey}`}
+        event={event}
+        events={events}
+        templates={templates}
+        thumbnails={thumbnails}
+        initialBranding={branding}
+        gmail={gmail}
+        initialSelected={detailKey}
+      />
+    );
+  }
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {event?.name ?? "Email templates"}
+          </h1>
+          <p className="text-sm text-muted-foreground">Status-linked templates for this event.</p>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>Event</span>
+          <Select
+            value={event?.id}
+            disabled={events.length === 0}
+            onValueChange={(eventId) => setSearchParams({ event: eventId })}
+          >
+            <SelectTrigger
+              className="w-72 max-w-full bg-background"
+              aria-label="Email template event"
+            >
+              <SelectValue placeholder="No event found" />
+            </SelectTrigger>
+            <SelectContent>
+              {events.map((option: EventWithCounts) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      {event ? (
+        <EventTemplateWorkspace
+          key={event.id}
+          event={event}
+          templates={templates}
+          thumbnails={thumbnails}
+          initialBranding={branding}
+          gmail={gmail}
+        />
+      ) : (
+        <div className="rounded-xl border bg-card p-10 text-center">
+          <h2 className="text-lg font-semibold">No current or upcoming event found</h2>
+          <p className="mx-auto mt-2 max-w-lg text-sm text-muted-foreground">
+            Create an event, or update an existing event’s dates, before editing its email
+            templates.
+          </p>
+          <Button asChild className="mt-5">
+            <Link to="/events">Create event</Link>
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function EventTemplateWorkspace({
+  event,
+  events,
+  templates,
+  thumbnails,
+  initialBranding,
+  gmail,
+  initialSelected,
+}: {
+  event: EventWithCounts;
+  events?: EventWithCounts[];
+  templates: Record<TemplateKey, TemplateContent>;
+  thumbnails: Record<TemplateKey, string>;
+  initialBranding: EmailBranding;
+  gmail: { configured: boolean; connected: boolean; email: string | null };
+  initialSelected?: TemplateKey;
+}) {
+  const navigate = useNavigate();
+  const [selected] = useState<TemplateKey>(initialSelected ?? TEMPLATE_KEYS[0]);
+  const detailMode = initialSelected !== undefined;
   const [drafts, setDrafts] = useState<Record<TemplateKey, TemplateContent>>(() =>
     structuredClone(templates),
   );
@@ -257,7 +436,6 @@ export default function EmailTemplates({ loaderData }: Route.ComponentProps) {
   const [savedBranding, setSavedBranding] = useState<EmailBranding>(() =>
     structuredClone(initialBranding),
   );
-  const [brandingPanelOpen, setBrandingPanelOpen] = useState(false);
   const hasUnsavedChanges = useMemo(
     () =>
       TEMPLATE_KEYS.some(
@@ -289,57 +467,64 @@ export default function EmailTemplates({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Email templates</h1>
-        <p className="text-sm text-muted-foreground">
-          Customize the transactional emails sent to applicants. Edits take effect on the next send.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Email template section">
-        {TEMPLATE_KEYS.map((k) => (
-          <Button
-            key={k}
-            variant={selected === k ? "default" : "outline"}
-            size="sm"
-            aria-pressed={selected === k}
-            onClick={() => setSelected(k)}
-          >
-            {TEMPLATE_META[k].label}
-          </Button>
-        ))}
-      </div>
-
-      <TemplateEditor
-        key={selected}
-        templateKey={selected}
-        content={drafts[selected]}
-        branding={branding}
-        gmail={gmail}
-        isDirty={JSON.stringify(drafts[selected]) !== JSON.stringify(savedTemplates[selected])}
-        onEditBranding={() => setBrandingPanelOpen(true)}
-        onChange={(next) => setDrafts((d) => ({ ...d, [selected]: next }))}
-        onSaved={markTemplateSaved}
-      />
-
-      <Sheet open={brandingPanelOpen} onOpenChange={setBrandingPanelOpen}>
-        <SheetContent side="right" className="overflow-y-auto sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>Branding and colors</SheetTitle>
-            <SheetDescription>
-              These settings are shared by every email template. Changes update the preview behind
-              this panel immediately.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="px-4">
-            <BrandingEditor
-              branding={branding}
-              onChange={setBranding}
-              onSaved={markBrandingSaved}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
+      {!detailMode ? (
+        <div className="grid auto-rows-fr gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {TEMPLATE_KEYS.map((key) => (
+            <Card
+              key={key}
+              className="h-full gap-0 py-0 shadow-sm transition-shadow hover:shadow-md"
+            >
+              <button
+                type="button"
+                className="flex h-full w-full flex-col text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                onClick={() => navigate(templateDetailPath(event.slug, key))}
+              >
+                <div className="h-44 w-full shrink-0 overflow-hidden border-b bg-[#F5F5F0]">
+                  <iframe
+                    title={TEMPLATE_META[key].label + " thumbnail"}
+                    srcDoc={thumbnails[key]}
+                    sandbox=""
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    className="pointer-events-none block h-88 w-[200%] origin-top-left scale-50 border-0 bg-[#F5F5F0]"
+                  />
+                </div>
+                <div className="flex min-h-40 w-full flex-1 flex-col gap-2 p-4">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <span className="size-2 shrink-0 rounded-full bg-green-600" />
+                    {TEMPLATE_META[key].label}
+                  </div>
+                  <p className="line-clamp-2 min-h-10 text-sm text-muted-foreground">
+                    {templates[key].subject}
+                  </p>
+                  <span className="mt-auto self-start rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    {TEMPLATE_META[key].trigger}
+                  </span>
+                </div>
+              </button>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <TemplateEditor
+          key={selected}
+          event={event}
+          templateKey={selected}
+          content={drafts[selected]}
+          branding={branding}
+          gmail={gmail}
+          events={events ?? []}
+          isDirty={JSON.stringify(drafts[selected]) !== JSON.stringify(savedTemplates[selected])}
+          isBrandingDirty={JSON.stringify(branding) !== JSON.stringify(savedBranding)}
+          onBack={() => navigate(`/email-templates?event=${encodeURIComponent(event.id)}`)}
+          onSelectTemplate={(key) => navigate(templateDetailPath(event.slug, key))}
+          onSelectEvent={(slug) => navigate(templateDetailPath(slug, selected))}
+          onBrandingChange={setBranding}
+          onBrandingSaved={markBrandingSaved}
+          onChange={(next) => setDrafts((d) => ({ ...d, [selected]: next }))}
+          onSaved={markTemplateSaved}
+        />
+      )}
 
       <Dialog
         open={navigationBlocker.state === "blocked"}
@@ -385,31 +570,60 @@ type ActionData = {
 };
 
 function TemplateEditor({
+  event,
+  events,
   templateKey,
   content,
   branding,
   gmail,
   isDirty,
-  onEditBranding,
+  isBrandingDirty,
+  onBack,
+  onSelectTemplate,
+  onSelectEvent,
+  onBrandingChange,
+  onBrandingSaved,
   onChange,
   onSaved,
 }: {
+  event: EventWithCounts;
+  events: EventWithCounts[];
   templateKey: TemplateKey;
   content: TemplateContent;
   branding: EmailBranding;
-  gmail: { connected: boolean; email: string | null };
+  gmail: { configured: boolean; connected: boolean; email: string | null };
   isDirty: boolean;
-  onEditBranding: () => void;
+  isBrandingDirty: boolean;
+  onBack: () => void;
+  onSelectTemplate: (key: TemplateKey) => void;
+  onSelectEvent: (slug: string) => void;
+  onBrandingChange: (branding: EmailBranding) => void;
+  onBrandingSaved: (branding: EmailBranding) => void;
   onChange: (next: TemplateContent) => void;
   onSaved: (key: TemplateKey, saved: TemplateContent) => void;
 }) {
-  const { state: sidebarState, isMobile } = useSidebar();
   const meta = TEMPLATE_META[templateKey];
   const tags = MERGE_TAGS[templateKey];
   const previewFetcher = useFetcher<ActionData>();
   const saveFetcher = useFetcher<ActionData>();
   const testFetcher = useFetcher<ActionData>();
-  const [mergeTagsOpen, setMergeTagsOpen] = useState(false);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(
+    () => content.blocks[0]?.id ?? null,
+  );
+  const selectedBlockRef = useRef<string | null>(null);
+  const [inspectorTab, setInspectorTab] = useState<"block" | "brand">("block");
+  const [paletteMode, setPaletteMode] = useState<"add" | "outline">("add");
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [previewMode, setPreviewMode] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [previewDocumentVersion, setPreviewDocumentVersion] = useState(0);
+  const [history, setHistory] = useState<{
+    past: { content: TemplateContent; branding: EmailBranding }[];
+    future: { content: TemplateContent; branding: EmailBranding }[];
+  }>({ past: [], future: [] });
+  const selectedBlock = content.blocks.find((block) => block.id === selectedBlockId);
+  selectedBlockRef.current = selectedBlockId;
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     id: string;
@@ -419,66 +633,65 @@ function TemplateEditor({
   const [pendingAction, setPendingAction] = useState<
     { type: "remove"; block: EmailBlock } | { type: "reset" } | null
   >(null);
-  const blockRefs = useRef(new Map<string, HTMLDivElement>());
   const previewIframe = useRef<HTMLIFrameElement | null>(null);
+  const previewActionRef = useRef<(id: string, action: string) => void>(() => {});
   const previewScrollTop = useRef(0);
   const pendingPreviewBlockId = useRef<string | null | undefined>(undefined);
   const pendingSavedContent = useRef<TemplateContent | null>(null);
-  const pendingFocusBlockId = useRef<string | null>(null);
-  const dragPointerY = useRef<number | null>(null);
-  const dragScrollFrame = useRef<number | null>(null);
+  const pendingSavedBranding = useRef<EmailBranding | null>(null);
 
-  const stopDragAutoScroll = useCallback(() => {
-    dragPointerY.current = null;
-    if (dragScrollFrame.current !== null) {
-      cancelAnimationFrame(dragScrollFrame.current);
-      dragScrollFrame.current = null;
-    }
-  }, []);
+  const recordChange = (nextContent: TemplateContent, nextBranding = branding) => {
+    setHistory((current) => ({
+      past: [
+        ...current.past,
+        { content: structuredClone(content), branding: structuredClone(branding) },
+      ].slice(-50),
+      future: [],
+    }));
+    if (nextContent !== content) onChange(nextContent);
+    if (nextBranding !== branding) onBrandingChange(nextBranding);
+  };
 
-  const updateDragAutoScroll = useCallback((clientY: number) => {
-    dragPointerY.current = clientY;
-    if (dragScrollFrame.current !== null) return;
+  const undo = () => {
+    const previous = history.past.at(-1);
+    if (!previous) return;
+    setHistory({
+      past: history.past.slice(0, -1),
+      future: [
+        { content: structuredClone(content), branding: structuredClone(branding) },
+        ...history.future,
+      ],
+    });
+    onChange(previous.content);
+    onBrandingChange(previous.branding);
+  };
 
-    const scrollAtEdge = () => {
-      const pointerY = dragPointerY.current;
-      if (pointerY === null) {
-        dragScrollFrame.current = null;
-        return;
-      }
-
-      const edgeSize = Math.min(140, window.innerHeight / 4);
-      const distanceFromBottom = window.innerHeight - pointerY;
-      let speed = 0;
-
-      if (pointerY < edgeSize) {
-        speed = -Math.ceil(((edgeSize - pointerY) / edgeSize) * 18);
-      } else if (distanceFromBottom < edgeSize) {
-        speed = Math.ceil(((edgeSize - distanceFromBottom) / edgeSize) * 18);
-      }
-
-      if (speed !== 0) window.scrollBy(0, speed);
-      dragScrollFrame.current = requestAnimationFrame(scrollAtEdge);
-    };
-
-    dragScrollFrame.current = requestAnimationFrame(scrollAtEdge);
-  }, []);
-
-  useEffect(() => stopDragAutoScroll, [stopDragAutoScroll]);
+  const redo = () => {
+    const next = history.future[0];
+    if (!next) return;
+    setHistory({
+      past: [
+        ...history.past,
+        { content: structuredClone(content), branding: structuredClone(branding) },
+      ],
+      future: history.future.slice(1),
+    });
+    onChange(next.content);
+    onBrandingChange(next.branding);
+  };
 
   useEffect(() => {
-    const blockId = pendingFocusBlockId.current;
-    if (!blockId) return;
-    pendingFocusBlockId.current = null;
-
-    const frame = requestAnimationFrame(() => {
-      const blockElement = blockRefs.current.get(blockId);
-      blockElement?.scrollIntoView({ behavior: "smooth", block: "center" });
-      blockElement?.focus({ preventScroll: true });
-    });
-
-    return () => cancelAnimationFrame(frame);
-  }, [content.blocks]);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
+        return;
+      event.preventDefault();
+      if (event.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
 
   const scrollPreviewToPendingBlock = useCallback(() => {
     const blockId = pendingPreviewBlockId.current;
@@ -486,6 +699,30 @@ function TemplateEditor({
     const document = frame?.contentDocument;
     const frameWindow = frame?.contentWindow;
     if (!document || !frameWindow) return;
+
+    const style = document.createElement("style");
+    style.textContent = `[data-email-block-id]{cursor:pointer;position:relative} [data-email-block-id]:hover{outline:2px solid #a3a3a3;outline-offset:-2px} [data-email-block-id].email-block-selected{outline:2px solid #2C2422;outline-offset:-2px} [data-email-branding]{position:relative;cursor:pointer} [data-email-branding]:hover{outline:2px dashed #a8a29e;outline-offset:-2px} [data-email-branding]:hover:after{content:'Shared branding — click to edit';position:absolute;right:8px;top:8px;background:white;color:#2C2422;border:1px solid #ddd;border-radius:99px;padding:5px 9px;font:11px Arial;box-shadow:0 2px 8px #0002} [data-editor-toolbar]{position:absolute;right:0;top:-30px;z-index:10;display:flex;gap:2px;background:#2C2422;color:white;border-radius:8px 8px 0 0;padding:3px} [data-editor-toolbar] button{display:flex;align-items:center;justify-content:center;width:26px;height:24px;border:0;background:transparent;color:white;cursor:pointer} [data-editor-toolbar] button:hover{background:#ffffff30;border-radius:4px} [data-editor-label]{position:absolute;left:0;top:-30px;z-index:10;background:#2C2422;color:white;border-radius:8px 8px 0 0;padding:7px 9px;font:11px Arial}`;
+    document.head.appendChild(style);
+    document.querySelectorAll<HTMLElement>("[data-email-block-id]").forEach((element) => {
+      element.classList.toggle(
+        "email-block-selected",
+        element.dataset.emailBlockId === selectedBlockRef.current,
+      );
+    });
+    document.addEventListener("click", (event) => {
+      event.preventDefault();
+      const target = event.target as Element | null;
+      const block = target?.closest<HTMLElement>("[data-email-block-id]");
+      if (block?.dataset.emailBlockId) {
+        setSelectedBlockId(block.dataset.emailBlockId);
+        setInspectorTab("block");
+      } else {
+        setSelectedBlockId(null);
+        setInspectorTab("brand");
+        if (target?.closest("[data-email-branding]"))
+          toast.message("Header and footer branding is shared across this event's templates.");
+      }
+    });
 
     // Updating srcDoc creates a new document at scroll position 0. Restore the
     // previous position before moving to a changed block so the preview does
@@ -515,6 +752,59 @@ function TemplateEditor({
     pendingPreviewBlockId.current = undefined;
   }, []);
 
+  useEffect(() => {
+    const document = previewIframe.current?.contentDocument;
+    if (!document) return;
+    let toolbarRoot: ReturnType<typeof createRoot> | null = null;
+    document
+      .querySelectorAll("[data-editor-toolbar],[data-editor-label]")
+      .forEach((element) => element.remove());
+    document.querySelectorAll("[data-email-block-id]").forEach((element) => {
+      const selected = (element as HTMLElement).dataset.emailBlockId === selectedBlockId;
+      element.classList.toggle("email-block-selected", selected);
+      if (selected) {
+        const block = content.blocks.find((item) => item.id === selectedBlockId);
+        if (!block) return;
+        const label = document.createElement("span");
+        label.dataset.editorLabel = "";
+        label.textContent = BLOCK_LABELS[block.type];
+        const toolbar = document.createElement("span");
+        toolbar.dataset.editorToolbar = "";
+        element.appendChild(label);
+        element.appendChild(toolbar);
+        toolbarRoot = createRoot(toolbar);
+        toolbarRoot.render(
+          <>
+            {(
+              [
+                ["up", "Move up", ArrowUp],
+                ["down", "Move down", ArrowDown],
+                ["copy", "Copy block", Copy],
+                ["delete", "Delete block", Trash2],
+              ] as const
+            ).map(([action, title, Icon]) => (
+              <button
+                key={action}
+                type="button"
+                title={title}
+                aria-label={title}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  previewActionRef.current(block.id, action);
+                }}
+              >
+                <Icon size={15} strokeWidth={2} aria-hidden="true" />
+              </button>
+            ))}
+          </>,
+        );
+      }
+    });
+    return () => {
+      toolbarRoot?.unmount();
+    };
+  }, [selectedBlockId, previewFetcher.data?.previewHtml, previewDocumentVersion, content.blocks]);
+
   // Debounced live preview whenever the working copy changes.
   const refreshPreview = useCallback(() => {
     const frameWindow = previewIframe.current?.contentWindow;
@@ -523,6 +813,7 @@ function TemplateEditor({
     previewFetcher.submit(
       {
         intent: "preview",
+        eventId: event.id,
         key: templateKey,
         subject: content.subject,
         preheader: content.preheader,
@@ -532,7 +823,7 @@ function TemplateEditor({
       { method: "post" },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateKey, content, branding]);
+  }, [templateKey, content, branding, event.id]);
 
   useEffect(() => {
     const t = setTimeout(refreshPreview, 500);
@@ -546,10 +837,13 @@ function TemplateEditor({
     if (d.ok) {
       toast.success(d.message);
       if (pendingSavedContent.current) onSaved(templateKey, pendingSavedContent.current);
+      if (pendingSavedBranding.current) onBrandingSaved(pendingSavedBranding.current);
+      setReviewOpen(false);
     } else {
       toast.error(d.message);
     }
     pendingSavedContent.current = null;
+    pendingSavedBranding.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveFetcher.data, saveFetcher.state, onSaved, templateKey]);
 
@@ -559,7 +853,7 @@ function TemplateEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testFetcher.data, testFetcher.state]);
 
-  const update = (patch: Partial<TemplateContent>) => onChange({ ...content, ...patch });
+  const update = (patch: Partial<TemplateContent>) => recordChange({ ...content, ...patch });
 
   const setBlocks = (blocks: EmailBlock[]) => update({ blocks });
 
@@ -573,7 +867,6 @@ function TemplateEditor({
     const j = idx + dir;
     if (j < 0 || j >= next.length) return;
     [next[idx], next[j]] = [next[j], next[idx]];
-    pendingFocusBlockId.current = block.id;
     pendingPreviewBlockId.current = block.id;
     setMoveAnnouncement(
       `${BLOCK_LABELS[block.type]} block moved to position ${j + 1} of ${next.length}.`,
@@ -590,21 +883,42 @@ function TemplateEditor({
 
   const addBlock = (type: BlockType) => {
     const block = newBlock(type);
+    setSelectedBlockId(block.id);
+    setInspectorTab("block");
     pendingPreviewBlockId.current = block.id;
     setBlocks([...content.blocks, block]);
   };
 
+  previewActionRef.current = (id, action) => {
+    const index = content.blocks.findIndex((block) => block.id === id);
+    if (index < 0) return;
+    const block = content.blocks[index];
+    if (action === "up" || action === "down") moveBlock(block, index, action === "up" ? -1 : 1);
+    if (action === "copy") {
+      const copied = { ...structuredClone(block), id: crypto.randomUUID() } as EmailBlock;
+      const next = [...content.blocks];
+      next.splice(index + 1, 0, copied);
+      setSelectedBlockId(copied.id);
+      pendingPreviewBlockId.current = copied.id;
+      setBlocks(next);
+    }
+    if (action === "delete") setPendingAction({ type: "remove", block });
+  };
+
   const submitPayload = (intent: string) => ({
     intent,
+    eventId: event.id,
     key: templateKey,
     subject: content.subject,
     preheader: content.preheader,
     blocks: JSON.stringify(content.blocks),
+    branding: JSON.stringify(branding),
   });
 
-  const saveCurrentTemplate = () => {
+  const publishCurrentTemplate = () => {
     pendingSavedContent.current = structuredClone(content);
-    saveFetcher.submit(submitPayload("save_template"), { method: "post" });
+    pendingSavedBranding.current = structuredClone(branding);
+    saveFetcher.submit(submitPayload("publish_template"), { method: "post" });
   };
 
   const confirmPendingAction = () => {
@@ -614,8 +928,11 @@ function TemplateEditor({
       removeBlock(pendingAction.block.id);
       toast.message(`${BLOCK_LABELS[pendingAction.block.type]} block removed from the draft.`);
     } else {
-      pendingPreviewBlockId.current = null;
-      onChange(structuredClone(DEFAULT_TEMPLATES[templateKey]));
+      const defaultBlockId = DEFAULT_TEMPLATES[templateKey].blocks[0]?.id ?? null;
+      setSelectedBlockId(defaultBlockId);
+      setInspectorTab("block");
+      pendingPreviewBlockId.current = defaultBlockId;
+      recordChange(structuredClone(DEFAULT_TEMPLATES[templateKey]));
       toast.message("Reset to default (not yet saved).");
     }
 
@@ -628,220 +945,516 @@ function TemplateEditor({
   };
 
   return (
-    <div className="grid gap-6 pb-28 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      {/* Editor column */}
-      <div className="flex flex-col gap-4">
-        <Card size="sm">
-          <CardHeader className="gap-1">
-            <CardTitle className="flex items-center gap-2">
-              {meta.label}
-              <Badge variant="secondary" className="font-normal">
-                {meta.trigger}
-              </Badge>
-            </CardTitle>
-            <CardDescription>{meta.description}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label htmlFor="subject">Subject</Label>
-                <Input
-                  id="subject"
-                  value={content.subject}
-                  onChange={(e) => update({ subject: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="preheader">
-                  Preheader <span className="text-muted-foreground">(inbox preview)</span>
-                </Label>
-                <Input
-                  id="preheader"
-                  value={content.preheader}
-                  onChange={(e) => update({ preheader: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="border-t pt-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="-ml-2 h-7"
-                aria-expanded={mergeTagsOpen}
-                aria-controls={`merge-tags-${templateKey}`}
-                onClick={() => setMergeTagsOpen((open) => !open)}
-              >
-                <ChevronDown
-                  className={`size-4 transition-transform ${mergeTagsOpen ? "rotate-180" : ""}`}
-                />
-                {mergeTagsOpen ? "Hide merge tags" : "Show merge tags"}
-                <Badge variant="secondary" className="ml-1 font-normal">
-                  {tags.length}
-                </Badge>
+    <div className="min-h-screen bg-background">
+      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          <ArrowLeft className="size-4" aria-hidden="true" /> All templates
+        </Button>
+        <span className="hidden h-6 border-l sm:block" />
+        <span className="font-semibold">{meta.label}</span>
+        <Badge variant="secondary">Active</Badge>
+        <span className="ml-2 text-xs text-muted-foreground">Event</span>
+        <Select value={event.slug} onValueChange={onSelectEvent}>
+          <SelectTrigger className="h-8 max-w-72 text-xs" aria-label="Email template event">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {events.map((option) => (
+              <SelectItem key={option.id} value={option.slug}>
+                {option.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {(isDirty || isBrandingDirty) && <Badge variant="outline">Unsaved changes</Badge>}
+          <Button variant="outline" size="sm" onClick={() => setPreviewMode((value) => !value)}>
+            <Eye className="size-4" /> {previewMode ? "Exit preview" : "Preview"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => testFetcher.submit(submitPayload("send_test"), { method: "post" })}
+            disabled={!gmail.connected || testFetcher.state !== "idle"}
+            title={
+              gmail.connected
+                ? "Send a sample to your signed-in admin email"
+                : gmail.configured
+                  ? "Connect Gmail in Invoice settings to send tests"
+                  : "Configure Google OAuth credentials and restart the local server"
+            }
+          >
+            <Send className="size-4" /> {testFetcher.state !== "idle" ? "Sending…" : "Send test"}
+          </Button>
+          {!gmail.connected &&
+            (gmail.configured ? (
+              <Button asChild variant="outline" size="sm">
+                <Link to="/invoice-settings">Connect Gmail</Link>
               </Button>
-              {mergeTagsOpen && (
-                <div id={`merge-tags-${templateKey}`} className="mt-2 flex flex-wrap gap-1.5">
-                  {tags.map((t) => (
-                    <button
-                      key={t.tag}
-                      type="button"
-                      onClick={() => copyTag(t.tag)}
-                      title={`${t.label} — click to copy`}
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 font-mono text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            ) : (
+              <span className="max-w-40 text-xs text-muted-foreground">
+                Add Google OAuth credentials, then restart the server.
+              </span>
+            ))}
+          <Button
+            size="sm"
+            onClick={() => setReviewOpen(true)}
+            disabled={saveFetcher.state !== "idle"}
+          >
+            Review email <ArrowRight className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          "grid min-h-[calc(100vh-57px)]",
+          previewMode ? "grid-cols-1" : "lg:grid-cols-[260px_minmax(0,1fr)_380px]",
+        )}
+      >
+        {!previewMode && (
+          <aside className="border-b bg-background lg:border-b-0 lg:border-r">
+            <div className="border-b p-3">
+              <h3 className="text-sm font-semibold">Application emails</h3>
+              <p className="text-xs text-muted-foreground">The right message for every outcome.</p>
+            </div>
+            <div className="grid gap-1 p-2">
+              {TEMPLATE_KEYS.map((key) => {
+                const Icon = TEMPLATE_ICONS[key];
+                const outcome = TEMPLATE_OUTCOMES[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => onSelectTemplate(key)}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-muted",
+                      templateKey === key && "bg-muted font-semibold",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-8 shrink-0 items-center justify-center rounded-lg",
+                        outcome.tone,
+                      )}
                     >
-                      <Copy className="size-3" />
-                      {`{{${t.tag}}}`}
+                      <Icon className="size-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block">{outcome.name}</span>
+                      <span className="block truncate text-xs font-normal text-muted-foreground">
+                        {outcome.sub}
+                      </span>
+                    </span>
+                    {templateKey === key && (
+                      <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="border-t p-2">
+              <div className="grid grid-cols-2 rounded-lg bg-muted p-0.5 text-xs">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md py-1.5",
+                    paletteMode === "add" && "bg-background shadow-sm",
+                  )}
+                  onClick={() => setPaletteMode("add")}
+                >
+                  Add blocks
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md py-1.5",
+                    paletteMode === "outline" && "bg-background shadow-sm",
+                  )}
+                  onClick={() => setPaletteMode("outline")}
+                >
+                  Outline
+                </button>
+              </div>
+              {paletteMode === "add" ? (
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {BLOCK_TYPES.map((type) => {
+                    const Icon = BLOCK_ICONS[type];
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => addBlock(type)}
+                        className="min-h-16 rounded-lg border px-2 py-2 text-center text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <Icon className="mx-auto mb-1 size-4" />
+                        {BLOCK_LABELS[type]}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="mt-2 grid gap-1">
+                  {content.blocks.map((block, index) => (
+                    <button
+                      key={block.id}
+                      type="button"
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData("text/plain", block.id);
+                        setDraggedBlockId(block.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedBlockId(null);
+                        setDropTarget(null);
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDropTarget({ id: block.id, position: "before" });
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const sourceId = draggedBlockId || event.dataTransfer.getData("text/plain");
+                        setBlocks(reorderEmailBlocks(content.blocks, sourceId, block.id, "before"));
+                        setDraggedBlockId(null);
+                        setDropTarget(null);
+                      }}
+                      onClick={() => {
+                        setSelectedBlockId(block.id);
+                        setInspectorTab("block");
+                        pendingPreviewBlockId.current = block.id;
+                        previewIframe.current?.contentDocument
+                          ?.querySelector('[data-email-block-id="' + block.id + '"]')
+                          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }}
+                      className={cn(
+                        "flex items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-muted",
+                        selectedBlockId === block.id && "bg-muted font-semibold",
+                        dropTarget?.id === block.id && "ring-2 ring-primary",
+                      )}
+                    >
+                      <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />{" "}
+                      <span className="truncate">
+                        {index + 1}. {BLOCK_LABELS[block.type]}
+                      </span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
-          </CardContent>
-        </Card>
+          </aside>
+        )}
 
-        <div
-          className="flex flex-col gap-3"
-          onDragOver={(event) => {
-            if (draggedBlockId) updateDragAutoScroll(event.clientY);
-          }}
-        >
-          {content.blocks.map((block, idx) => {
-            const target = dropTarget?.id === block.id ? dropTarget : null;
-            return (
-              <div
-                key={block.id}
-                ref={(element) => {
-                  if (element) blockRefs.current.set(block.id, element);
-                  else blockRefs.current.delete(block.id);
-                }}
-                tabIndex={-1}
-                aria-label={`${BLOCK_LABELS[block.type]} block, position ${idx + 1} of ${content.blocks.length}`}
-                className="relative scroll-m-24 rounded-xl outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  if (!draggedBlockId || draggedBlockId === block.id) {
-                    setDropTarget(null);
-                    return;
-                  }
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-                  setDropTarget((current) =>
-                    current?.id === block.id && current.position === position
-                      ? current
-                      : { id: block.id, position },
-                  );
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const sourceId = draggedBlockId || event.dataTransfer.getData("text/plain");
-                  if (sourceId && target) {
-                    pendingPreviewBlockId.current = sourceId;
-                    setBlocks(
-                      reorderEmailBlocks(content.blocks, sourceId, block.id, target.position),
-                    );
-                  }
-                  setDraggedBlockId(null);
-                  setDropTarget(null);
-                  stopDragAutoScroll();
-                }}
-              >
-                {target && (
-                  <div
-                    className={`pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-primary ${
-                      target.position === "before" ? "-top-1.5" : "-bottom-1.5"
-                    }`}
-                    aria-hidden="true"
-                  />
-                )}
-                <BlockCard
-                  block={block}
-                  first={idx === 0}
-                  last={idx === content.blocks.length - 1}
-                  dragging={draggedBlockId === block.id}
-                  onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", block.id);
-                    setDraggedBlockId(block.id);
-                  }}
-                  onDragEnd={() => {
-                    setDraggedBlockId(null);
-                    setDropTarget(null);
-                    stopDragAutoScroll();
-                  }}
-                  onMove={(dir) => moveBlock(block, idx, dir)}
-                  onRemove={() => setPendingAction({ type: "remove", block })}
-                  onChange={(patch) => updateBlock(block.id, patch)}
-                />
+        <main className="min-w-0 bg-muted/40">
+          <div className="relative flex items-center justify-center gap-1 border-b bg-background p-2 text-xs">
+            {!previewMode && (
+              <div className="absolute left-2 flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  disabled={!history.past.length}
+                  onClick={undo}
+                  aria-label="Undo"
+                  title="Undo"
+                >
+                  <Undo2 className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  disabled={!history.future.length}
+                  onClick={redo}
+                  aria-label="Redo"
+                  title="Redo"
+                >
+                  <Redo2 className="size-4" />
+                </Button>
               </div>
-            );
-          })}
-          <p className="sr-only" aria-live="polite">
-            {moveAnnouncement}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="w-[200px] justify-start">
-                <Plus className="size-4" /> Add block
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[200px]">
-              {BLOCK_TYPES.map((t) => (
-                <DropdownMenuItem key={t} onSelect={() => addBlock(t)}>
-                  {BLOCK_LABELS[t]}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="ghost" size="sm" onClick={() => setPendingAction({ type: "reset" })}>
-            Reset to default
-          </Button>
-        </div>
-
-        <div
-          className="fixed bottom-0 right-0 z-40 border-t bg-background/95 shadow-[0_-4px_16px_rgba(0,0,0,0.08)] backdrop-blur-sm transition-[left] duration-200"
-          style={{
-            left: isMobile
-              ? 0
-              : sidebarState === "collapsed"
-                ? "var(--sidebar-width-icon)"
-                : "var(--sidebar-width)",
-          }}
-        >
-          <div className="flex w-full flex-wrap items-center justify-end gap-2 px-4 py-3 md:px-6">
-            {isDirty && (
-              <Badge variant="secondary" className="mr-auto font-normal">
-                Unsaved changes
-              </Badge>
             )}
-            {!gmail.connected && (
-              <span className={`${isDirty ? "" : "mr-auto"} text-xs text-muted-foreground`}>
-                Gmail not connected — test send disabled.
+            <button
+              type="button"
+              className={cn(
+                "rounded-md px-3 py-1.5",
+                device === "desktop" && "bg-muted font-medium",
+              )}
+              onClick={() => setDevice("desktop")}
+            >
+              <span className="flex items-center gap-1">
+                <Eye className="size-3.5" /> Desktop
               </span>
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "rounded-md px-3 py-1.5",
+                device === "mobile" && "bg-muted font-medium",
+              )}
+              onClick={() => setDevice("mobile")}
+            >
+              <span className="flex items-center gap-1">
+                <Smartphone className="size-3.5" /> Mobile
+              </span>
+            </button>
+          </div>
+          <div className="mx-auto max-w-[720px] p-4 sm:p-6">
+            <h2 className="text-xl font-semibold">{meta.label}</h2>
+            <p className="mb-4 text-sm text-muted-foreground">· {meta.trigger}</p>
+            <div className="overflow-hidden rounded-lg border bg-background">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 p-3 text-left"
+                onClick={() => setDetailsExpanded((value) => !value)}
+                aria-expanded={detailsExpanded}
+              >
+                <span className="min-w-0">
+                  <strong className="block truncate text-sm">
+                    {previewFetcher.data?.previewSubject ?? content.subject}
+                  </strong>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {content.preheader}
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "size-4 shrink-0 transition-transform",
+                    detailsExpanded && "rotate-180",
+                  )}
+                />
+              </button>
+              {detailsExpanded && (
+                <div className="grid gap-3 border-t p-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium">Status</p>
+                      <Badge
+                        variant="outline"
+                        className="gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-800"
+                      >
+                        <span className="size-1.5 rounded-full bg-emerald-600" /> Active
+                      </Badge>
+                      <p className="text-xs text-muted-foreground">
+                        Ready for this event after publishing.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium">Trigger</p>
+                      <p className="inline-flex max-w-full items-start gap-1.5 rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs leading-relaxed text-foreground">
+                        <Zap className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        {meta.trigger}
+                      </p>
+                    </div>
+                  </div>
+                  <Field label="Subject">
+                    <Input
+                      value={content.subject}
+                      onChange={(event) => update({ subject: event.target.value })}
+                    />
+                  </Field>
+                  <Field label="Preheader (inbox preview text)">
+                    <Input
+                      value={content.preheader}
+                      onChange={(event) => update({ preheader: event.target.value })}
+                    />
+                  </Field>
+                </div>
+              )}
+            </div>
+            {!previewMode && (
+              <p className="my-4 text-center text-xs text-muted-foreground">
+                Click any block to edit it. Click the header or footer to edit brand style.
+              </p>
             )}
+            <div
+              className={cn(
+                "mx-auto mt-4 overflow-hidden border bg-white shadow-sm transition-[max-width] duration-300 ease-in-out motion-reduce:transition-none",
+                device === "mobile" ? "max-w-[390px]" : "max-w-[720px]",
+              )}
+            >
+              <iframe
+                ref={previewIframe}
+                title="Email preview"
+                sandbox="allow-same-origin"
+                className="h-[72vh] w-full bg-white"
+                srcDoc={previewFetcher.data?.previewHtml ?? ""}
+                onLoad={() => {
+                  scrollPreviewToPendingBlock();
+                  setPreviewDocumentVersion((version) => version + 1);
+                }}
+              />
+            </div>
+            <p className="mt-3 text-center text-xs text-muted-foreground">
+              Preview uses sample applicant data. Conditional blocks may be hidden in real sends.
+            </p>
+          </div>
+        </main>
+
+        {!previewMode && (
+          <aside className="min-w-0 border-t bg-background lg:border-l lg:border-t-0">
+            <div className="grid grid-cols-2 border-b text-sm">
+              <button
+                type="button"
+                className={cn(
+                  "flex items-center justify-center gap-1.5 border-b-2 py-3",
+                  inspectorTab === "block"
+                    ? "border-foreground font-medium"
+                    : "border-transparent text-muted-foreground",
+                )}
+                onClick={() => setInspectorTab("block")}
+              >
+                <ReceiptText className="size-4" /> Block
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "flex items-center justify-center gap-1.5 border-b-2 py-3",
+                  inspectorTab === "brand"
+                    ? "border-foreground font-medium"
+                    : "border-transparent text-muted-foreground",
+                )}
+                onClick={() => setInspectorTab("brand")}
+              >
+                <Palette className="size-4" /> Brand style
+              </button>
+            </div>
+            <div className="max-h-[85vh] overflow-y-auto p-3">
+              {inspectorTab === "brand" ? (
+                <BrandingEditor
+                  branding={branding}
+                  onChange={(next) => recordChange(content, next)}
+                />
+              ) : selectedBlock ? (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold">Selected block</h3>
+                    <p className="text-xs text-muted-foreground">Make this block your own.</p>
+                  </div>
+                  <BlockInspector
+                    block={selectedBlock}
+                    onRemove={() => setPendingAction({ type: "remove", block: selectedBlock })}
+                    onChange={(patch) => updateBlock(selectedBlock.id, patch)}
+                  />
+                  <div className="border-t pt-3">
+                    <p className="mb-2 text-xs font-semibold">Personalize & link</p>
+                    <div className="flex flex-wrap gap-1">
+                      {tags.map((tag) => (
+                        <button
+                          key={tag.tag}
+                          type="button"
+                          onClick={() => copyTag(tag.tag)}
+                          className="rounded border bg-muted/30 px-1.5 py-1 font-mono text-[11px] hover:bg-muted"
+                          title={tag.label}
+                        >
+                          {"{{" + tag.tag + "}}"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="justify-start"
+                    onClick={() => setPendingAction({ type: "reset" })}
+                  >
+                    <RotateCcw className="size-4" />
+                    Reset template to default
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4 text-sm text-muted-foreground">
+                  <p>
+                    No block selected. Click any block in the email preview, or add one on the left.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="justify-start"
+                    onClick={() => setPendingAction({ type: "reset" })}
+                  >
+                    <RotateCcw className="size-4" />
+                    Reset template to default
+                  </Button>
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
+      <p className="sr-only" aria-live="polite">
+        {moveAnnouncement}
+      </p>
+
+      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+        <DialogContent className="sm:max-w-[640px]">
+          <DialogHeader>
+            <DialogTitle>Review {TEMPLATE_OUTCOMES[templateKey].name} application</DialogTitle>
+            <DialogDescription>
+              Check the essentials before this template is used by the dashboard.
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="grid grid-cols-[110px_1fr] gap-x-4 gap-y-3 border-t py-4 text-sm">
+            <dt className="text-muted-foreground">Template</dt>
+            <dd className="font-medium">{meta.label}</dd>
+            <dt className="text-muted-foreground">Event</dt>
+            <dd className="font-medium">{event.name}</dd>
+            <dt className="text-muted-foreground">Trigger</dt>
+            <dd className="font-medium">{meta.trigger}</dd>
+            <dt className="text-muted-foreground">Subject</dt>
+            <dd className="font-medium">
+              {previewFetcher.data?.previewSubject ?? content.subject}
+            </dd>
+            <dt className="text-muted-foreground">Content</dt>
+            <dd className="font-medium">
+              {content.blocks.length} blocks · Desktop and mobile ready
+            </dd>
+          </dl>
+          {isBrandingDirty && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Your brand style changes will also be published and shared by every template for this
+              event.
+            </p>
+          )}
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            Publishing saves this template for the selected event. It does not send an applicant
+            email now; future matching actions use the published version.
+          </p>
+          {!gmail.connected && (
+            <p className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
+              {gmail.configured ? (
+                <>
+                  Google OAuth credentials are configured, but no Gmail account is connected yet. Go
+                  to{" "}
+                  <Link
+                    to="/invoice-settings"
+                    className="font-medium text-foreground underline underline-offset-2"
+                  >
+                    Invoice settings
+                  </Link>{" "}
+                  and select Connect Gmail before sending a test.
+                </>
+              ) : (
+                "Configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, restart the local server, then connect Gmail in Invoice settings."
+              )}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReviewOpen(false)}>
+              Back to edit
+            </Button>
             <Button
               variant="outline"
-              onClick={() => testFetcher.submit(submitPayload("send_test"), { method: "post" })}
               disabled={!gmail.connected || testFetcher.state !== "idle"}
-              title={
-                gmail.connected
-                  ? `Send a sample to ${gmail.email}`
-                  : "Connect Gmail in Invoice settings to send tests"
-              }
+              onClick={() => testFetcher.submit(submitPayload("send_test"), { method: "post" })}
             >
-              <Send className="size-4" />
-              {testFetcher.state !== "idle" ? "Sending…" : "Send test to me"}
+              Send test
             </Button>
-            <Button onClick={saveCurrentTemplate} disabled={saveFetcher.state !== "idle"}>
-              {saveFetcher.state !== "idle" ? "Saving…" : "Save template"}
+            <Button disabled={saveFetcher.state !== "idle"} onClick={publishCurrentTemplate}>
+              {saveFetcher.state !== "idle" ? "Publishing…" : "Publish changes"}
             </Button>
-          </div>
-        </div>
-      </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={pendingAction !== null}
@@ -854,8 +1467,8 @@ function TemplateEditor({
             </DialogTitle>
             <DialogDescription>
               {pendingAction?.type === "remove"
-                ? `The ${BLOCK_LABELS[pendingAction.block.type].toLowerCase()} block will be removed from this draft. This change will not become final until you save the template.`
-                : "The subject, preheader, and all content blocks will be replaced with the default template. This change will not become final until you save the template."}
+                ? "This block will be removed from the draft. Save changes to publish the removal."
+                : "The subject, preheader, and all blocks will return to the default draft. Save changes to publish the reset."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -868,42 +1481,6 @@ function TemplateEditor({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Preview column */}
-      <div className="flex flex-col gap-2 lg:sticky lg:top-4 lg:self-start">
-        <div className="flex items-center justify-between">
-          <Label className="flex items-center gap-2">
-            <Eye className="size-4" /> Live preview
-          </Label>
-          <span className="truncate text-xs text-muted-foreground">
-            {previewFetcher.data?.previewSubject ?? " "}
-          </span>
-        </div>
-        <div className="relative overflow-hidden rounded-lg border bg-muted/30">
-          <iframe
-            ref={previewIframe}
-            title="Email preview"
-            sandbox="allow-same-origin"
-            className="h-[70vh] w-full bg-white"
-            srcDoc={previewFetcher.data?.previewHtml ?? ""}
-            onLoad={scrollPreviewToPendingBlock}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="absolute right-3 top-3 z-10 bg-background/95 shadow-md backdrop-blur-sm"
-            onClick={onEditBranding}
-          >
-            <Palette className="size-4" />
-            Edit branding
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Rendered with sample data. Blocks hidden when their variable is empty (e.g. the pay
-          button) still show here because samples are filled in.
-        </p>
-      </div>
     </div>
   );
 }
@@ -912,79 +1489,34 @@ function TemplateEditor({
 // Block editors
 // ---------------------------------------------------------------------------
 
-function BlockCard({
+function BlockInspector({
   block,
-  first,
-  last,
-  dragging,
-  onDragStart,
-  onDragEnd,
-  onMove,
   onRemove,
   onChange,
 }: {
   block: EmailBlock;
-  first: boolean;
-  last: boolean;
-  dragging: boolean;
-  onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
-  onDragEnd: () => void;
-  onMove: (dir: -1 | 1) => void;
   onRemove: () => void;
   onChange: (patch: Record<string, unknown>) => void;
 }) {
+  const Icon = BLOCK_ICONS[block.type];
   return (
-    <Card className={dragging ? "opacity-60" : undefined}>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 py-3">
-        <Badge variant="outline">{BLOCK_LABELS[block.type]}</Badge>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 cursor-grab active:cursor-grabbing"
-            draggable
-            aria-label={`Drag ${BLOCK_LABELS[block.type]} block to reorder`}
-            title="Drag to reorder"
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-          >
-            <GripVertical className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            disabled={first}
-            aria-label="Move block up"
-            title="Move block up"
-            onClick={() => onMove(-1)}
-          >
-            <ArrowUp className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            disabled={last}
-            aria-label="Move block down"
-            title="Move block down"
-            onClick={() => onMove(1)}
-          >
-            <ArrowDown className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 text-destructive"
-            aria-label="Remove block"
-            title="Remove block"
-            onClick={onRemove}
-          >
-            <Trash2 className="size-4" />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="grid gap-3 pb-4">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2 border-b pb-3">
+        <Badge variant="outline" className="gap-1">
+          <Icon className="size-3.5" />
+          {BLOCK_LABELS[block.type]}
+        </Badge>
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-destructive hover:text-destructive"
+          aria-label="Remove block"
+          onClick={onRemove}
+        >
+          <Trash2 className="size-4" /> Remove
+        </Button>
+      </div>
+      <div className="grid gap-4">
         <BlockFields block={block} onChange={onChange} />
         {block.type !== "spacer" && block.type !== "divider" && (
           <div className="grid gap-1.5">
@@ -999,8 +1531,8 @@ function BlockCard({
             />
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -1017,16 +1549,13 @@ function EmailImageInput({
   label,
   url,
   onChange,
-  previewBackground = "#fff",
-  placeholder = "https://…",
 }: {
   label: string;
   url: string;
   onChange: (url: string) => void;
-  previewBackground?: string;
-  placeholder?: string;
 }) {
   const uploadFetcher = useFetcher<ActionData>();
+  const inputRef = useRef<HTMLInputElement>(null);
   const handledResult = useRef<ActionData | undefined>(undefined);
 
   useEffect(() => {
@@ -1045,55 +1574,58 @@ function EmailImageInput({
 
   return (
     <Field label={label}>
-      <div className="flex items-start gap-3">
-        <div
-          className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded border"
-          style={{ background: previewBackground }}
-        >
+      <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/20 p-2">
+        <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background">
           {url ? (
-            <img src={url} alt="" className="max-h-14 max-w-14 object-contain" />
+            <img src={url} alt="" className="max-h-12 max-w-12 object-contain" />
           ) : (
-            <span className="text-[10px] text-muted-foreground">No image</span>
+            <ImageIcon className="size-5 text-muted-foreground" />
           )}
         </div>
-        <div className="grid min-w-0 flex-1 gap-2">
-          <Input
-            type="url"
-            aria-label={`${label} URL`}
-            value={url}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder={placeholder}
-          />
-          <div className="relative">
-            <Input
-              type="file"
-              aria-label={`Upload ${label.toLowerCase()}`}
-              accept="image/png,image/jpeg,image/gif,image/webp"
-              disabled={uploading}
-              className="pr-24"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (!file) return;
-                const data = new FormData();
-                data.set("intent", "upload_image");
-                data.set("image", file);
-                uploadFetcher.submit(data, {
-                  method: "post",
-                  encType: "multipart/form-data",
-                });
-                event.target.value = "";
-              }}
-            />
-            <span className="pointer-events-none absolute right-2 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 text-xs text-muted-foreground">
-              {uploading ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : (
-                <Upload className="size-3" />
-              )}
-              {uploading ? "Uploading…" : "Max 5 MB"}
-            </span>
-          </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold">
+            {url ? "Image ready" : "No image uploaded"}
+          </p>
+          <p className="text-[11px] leading-tight text-muted-foreground">
+            PNG, JPG, GIF or WebP · max 5 MB
+          </p>
         </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          className="sr-only"
+          aria-label={`Upload ${label.toLowerCase()}`}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const data = new FormData();
+            data.set("intent", "upload_image");
+            data.set("image", file);
+            uploadFetcher.submit(data, { method: "post", encType: "multipart/form-data" });
+            event.target.value = "";
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+          {url ? "Replace" : "Upload"}
+        </Button>
+        {url && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0"
+            aria-label={`Remove ${label.toLowerCase()}`}
+            onClick={() => onChange("")}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        )}
       </div>
     </Field>
   );
@@ -1122,14 +1654,16 @@ function BlockFields({
               onChange={(e) => onChange({ subtext: e.target.value })}
             />
           </Field>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`show-reference-${block.id}`}
               checked={block.showReference ?? false}
-              onChange={(e) => onChange({ showReference: e.target.checked })}
+              onCheckedChange={(checked) => onChange({ showReference: checked === true })}
             />
-            Show submission reference chip
-          </label>
+            <Label htmlFor={`show-reference-${block.id}`} className="cursor-pointer">
+              Show submission reference chip
+            </Label>
+          </div>
         </>
       );
     case "image":
@@ -1150,18 +1684,6 @@ function BlockFields({
               onChange={(event) => onChange({ linkUrl: event.target.value })}
               placeholder="https://…"
             />
-          </Field>
-          <Field label="Width">
-            <Select value={block.width} onValueChange={(width) => onChange({ width })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="full">Full (520 px)</SelectItem>
-                <SelectItem value="medium">Medium (360 px)</SelectItem>
-                <SelectItem value="small">Small (200 px)</SelectItem>
-              </SelectContent>
-            </Select>
           </Field>
         </>
       );
@@ -1184,14 +1706,16 @@ function BlockFields({
     case "list":
       return (
         <>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`numbered-list-${block.id}`}
               checked={block.ordered}
-              onChange={(e) => onChange({ ordered: e.target.checked })}
+              onCheckedChange={(checked) => onChange({ ordered: checked === true })}
             />
-            Numbered list
-          </label>
+            <Label htmlFor={`numbered-list-${block.id}`} className="cursor-pointer">
+              Numbered list
+            </Label>
+          </div>
           <Field label="Items (one per line)">
             <Textarea
               className="min-h-24"
@@ -1287,154 +1811,273 @@ function BlockFields({
 // Branding editor
 // ---------------------------------------------------------------------------
 
+function BrandLogoInput({
+  label,
+  url,
+  background,
+  onChange,
+}: {
+  label: string;
+  url: string;
+  background: string;
+  onChange: (url: string) => void;
+}) {
+  const uploadFetcher = useFetcher<ActionData>();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const handledResult = useRef<ActionData | undefined>(undefined);
+
+  useEffect(() => {
+    const result = uploadFetcher.data;
+    if (!result || uploadFetcher.state !== "idle" || handledResult.current === result) return;
+    handledResult.current = result;
+    if (result.ok && result.imageUrl) {
+      onChange(result.imageUrl);
+      toast.success(`${label} uploaded. Publish changes to use it in future emails.`);
+    } else if (!result.ok) {
+      toast.error(result.message ?? "Could not upload the logo.");
+    }
+  }, [label, onChange, uploadFetcher.data, uploadFetcher.state]);
+
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/20 p-2">
+        <div
+          className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background"
+          style={{ background }}
+        >
+          {url ? (
+            <img src={url} alt="" className="max-h-12 max-w-12 object-contain" />
+          ) : (
+            <ImageIcon className="size-5 text-muted-foreground" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold">
+            {url ? "Logo ready" : "No logo uploaded"}
+          </p>
+          <p className="text-[11px] leading-tight text-muted-foreground">
+            PNG, JPG, GIF or WebP · max 5 MB
+          </p>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          className="sr-only"
+          aria-label={`Upload ${label.toLowerCase()}`}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const form = new FormData();
+            form.set("intent", "upload_image");
+            form.set("image", file);
+            uploadFetcher.submit(form, { method: "post", encType: "multipart/form-data" });
+            event.target.value = "";
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={uploadFetcher.state !== "idle"}
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploadFetcher.state !== "idle" ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Upload className="size-4" />
+          )}
+          {url ? "Replace" : "Upload"}
+        </Button>
+        {url && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0"
+            aria-label={`Remove ${label.toLowerCase()}`}
+            onClick={() => onChange("")}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+function BrandSection({ title }: { title: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <span>{title}</span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
 function BrandingEditor({
   branding,
   onChange,
-  onSaved,
 }: {
   branding: EmailBranding;
   onChange: (b: EmailBranding) => void;
-  onSaved: (branding: EmailBranding) => void;
 }) {
-  const saveFetcher = useFetcher<ActionData>();
-  const pendingSavedBranding = useRef<EmailBranding | null>(null);
-
-  useEffect(() => {
-    const d = saveFetcher.data;
-    if (!d || saveFetcher.state !== "idle") return;
-
-    if (d.ok) {
-      toast.success(d.message);
-      if (pendingSavedBranding.current) onSaved(pendingSavedBranding.current);
-    } else {
-      toast.error(d.message);
-    }
-    pendingSavedBranding.current = null;
-  }, [onSaved, saveFetcher.data, saveFetcher.state]);
-
   const set = (patch: Partial<EmailBranding>) => onChange({ ...branding, ...patch });
-  const saveCurrentBranding = () => {
-    pendingSavedBranding.current = structuredClone(branding);
-    saveFetcher.submit(
-      { intent: "save_branding", ...brandingToForm(branding) },
-      { method: "post" },
-    );
-  };
-  const colorField = (key: keyof EmailBranding, label: string) => (
+  const colorField = (
+    key: "brandColor" | "accentColor" | "buttonColor" | "headerBg" | "footerBg",
+    label: string,
+  ) => (
     <Field label={label}>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-1.5">
         <input
           type="color"
-          value={String(branding[key])}
-          onChange={(e) => set({ [key]: e.target.value } as Partial<EmailBranding>)}
-          className="size-9 shrink-0 rounded border"
+          aria-label={`${label} color picker`}
+          value={branding[key]}
+          onChange={(event) => set({ [key]: event.target.value })}
+          className="size-9 shrink-0 cursor-pointer rounded border bg-background p-1"
         />
         <Input
-          value={String(branding[key])}
-          onChange={(e) => set({ [key]: e.target.value } as Partial<EmailBranding>)}
-          className="font-mono"
+          aria-label={`${label} hex color`}
+          value={branding[key]}
+          onChange={(event) => set({ [key]: event.target.value })}
+          className="min-w-0 flex-1 font-mono text-xs"
         />
       </div>
     </Field>
   );
+  const updateSocial = (id: string, patch: { label?: string; url?: string }) =>
+    set({
+      socialLinks: branding.socialLinks.map((link) =>
+        link.id === id ? { ...link, ...patch } : link,
+      ),
+    });
 
   return (
-    <Card className="max-w-2xl overflow-visible pb-0">
-      <CardHeader>
-        <CardTitle>Branding</CardTitle>
-        <CardDescription>
-          Shared header, colors, and footer applied to every template.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4 pb-0">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="From name">
-            <Input value={branding.fromName} onChange={(e) => set({ fromName: e.target.value })} />
-          </Field>
-          <Field label="Contact email">
-            <Input
-              value={branding.contactEmail}
-              onChange={(e) => set({ contactEmail: e.target.value })}
-            />
-          </Field>
-        </div>
-        <EmailImageInput
-          label="Header logo"
-          url={branding.logoUrl}
-          onChange={(logoUrl) => set({ logoUrl })}
-          previewBackground={branding.headerBg}
-        />
-        <div className="grid gap-4 sm:grid-cols-2">
-          {colorField("brandColor", "Brand / hero background")}
-          {colorField("accentColor", "Accent (pill)")}
-          {colorField("buttonColor", "Button")}
-          {colorField("headerBg", "Header background")}
-        </div>
-        <Field label="Website URL">
+    <div className="space-y-4 pb-6">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
+        <Palette className="mr-2 inline size-4 align-text-bottom" />
+        <strong>Shared across all {TEMPLATE_KEYS.length} templates.</strong> Logo, colors, footer
+        and social links update every email for this event. The preview changes live; use Review
+        email → Publish changes to save.
+      </div>
+      <BrandSection title="Identity" />
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="From name">
           <Input
-            value={branding.websiteUrl}
-            onChange={(e) => set({ websiteUrl: e.target.value })}
+            value={branding.fromName}
+            onChange={(event) => set({ fromName: event.target.value })}
           />
         </Field>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Instagram URL">
-            <Input
-              value={branding.instagramUrl}
-              onChange={(e) => set({ instagramUrl: e.target.value })}
-            />
-          </Field>
-          <Field label="Facebook URL">
-            <Input
-              value={branding.facebookUrl}
-              onChange={(e) => set({ facebookUrl: e.target.value })}
-            />
-          </Field>
-          <Field label="TikTok URL">
-            <Input
-              value={branding.tiktokUrl}
-              onChange={(e) => set({ tiktokUrl: e.target.value })}
-            />
-          </Field>
-        </div>
-        <EmailImageInput
-          label="Footer logo"
-          url={branding.footerLogoUrl}
-          onChange={(footerLogoUrl) => set({ footerLogoUrl })}
-          previewBackground={branding.footerBg || branding.brandColor}
-          placeholder="Light/inverted logo for the dark footer"
+        <Field label="Contact email">
+          <Input
+            type="email"
+            value={branding.contactEmail}
+            onChange={(event) => set({ contactEmail: event.target.value })}
+          />
+        </Field>
+      </div>
+      <BrandLogoInput
+        label="Header logo"
+        url={branding.logoUrl}
+        background={branding.headerBg}
+        onChange={(logoUrl) => set({ logoUrl })}
+      />
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id="custom-header-logo-width"
+          checked={branding.headerLogoWidth !== null}
+          onCheckedChange={(checked) => set({ headerLogoWidth: checked === true ? 180 : null })}
         />
-        {colorField("footerBg", "Footer background")}
-        <Field label="Footer text">
-          <Textarea
-            value={branding.footerText}
-            onChange={(e) => set({ footerText: e.target.value })}
-          />
+        <Label htmlFor="custom-header-logo-width" className="cursor-pointer text-xs font-normal">
+          Set a custom header logo width
+        </Label>
+      </div>
+      {branding.headerLogoWidth !== null && (
+        <Field label="Header logo width">
+          <div className="flex items-center gap-3">
+            <Slider
+              aria-label="Header logo width"
+              min={80}
+              max={320}
+              step={1}
+              value={[branding.headerLogoWidth]}
+              onValueChange={([width]) => set({ headerLogoWidth: width })}
+            />
+            <output className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+              {branding.headerLogoWidth}px
+            </output>
+          </div>
         </Field>
-        <div className="sticky bottom-0 z-20 -mx-4 mt-2 flex justify-end rounded-b-xl border-t bg-card/95 p-4 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] backdrop-blur-sm">
-          <Button onClick={saveCurrentBranding} disabled={saveFetcher.state !== "idle"}>
-            {saveFetcher.state !== "idle" ? "Saving…" : "Save branding"}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      )}
+      <BrandSection title="Colors" />
+      <div className="grid grid-cols-2 gap-3">
+        {colorField("brandColor", "Brand / hero")}
+        {colorField("accentColor", "Accent (pill)")}
+        {colorField("buttonColor", "Button")}
+        {colorField("headerBg", "Header background")}
+        {colorField("footerBg", "Footer background")}
+      </div>
+      <BrandSection title="Footer & links" />
+      <BrandLogoInput
+        label="Footer logo"
+        url={branding.footerLogoUrl}
+        background={branding.footerBg || branding.brandColor}
+        onChange={(footerLogoUrl) => set({ footerLogoUrl })}
+      />
+      <div className="space-y-2">
+        <p className="text-xs font-semibold">
+          Social accounts{" "}
+          <span className="font-normal text-muted-foreground">(add any platform or profile)</span>
+        </p>
+        {branding.socialLinks.map((link) => (
+          <div key={link.id} className="flex items-center gap-1.5">
+            <Input
+              aria-label="Social platform"
+              placeholder="Platform"
+              value={link.label}
+              onChange={(event) => updateSocial(link.id, { label: event.target.value })}
+              className="w-28 shrink-0"
+            />
+            <Input
+              aria-label={`${link.label || "Social"} URL`}
+              type="url"
+              placeholder="https://…"
+              value={link.url}
+              onChange={(event) => updateSocial(link.id, { url: event.target.value })}
+              className="min-w-0 flex-1"
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-9 shrink-0"
+              aria-label={`Remove ${link.label || "social"} link`}
+              onClick={() =>
+                set({ socialLinks: branding.socialLinks.filter((item) => item.id !== link.id) })
+              }
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        ))}
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() =>
+            set({
+              socialLinks: [
+                ...branding.socialLinks,
+                { id: crypto.randomUUID(), label: "", url: "" },
+              ],
+            })
+          }
+        >
+          <Plus className="size-4" /> Add social link
+        </Button>
+      </div>
+      <Field label="Footer text">
+        <Textarea
+          value={branding.footerText}
+          onChange={(event) => set({ footerText: event.target.value })}
+        />
+      </Field>
+    </div>
   );
-}
-
-function brandingToForm(b: EmailBranding): Record<string, string> {
-  return {
-    fromName: b.fromName,
-    logoUrl: b.logoUrl,
-    brandColor: b.brandColor,
-    accentColor: b.accentColor,
-    buttonColor: b.buttonColor,
-    headerBg: b.headerBg,
-    footerBg: b.footerBg,
-    footerLogoUrl: b.footerLogoUrl,
-    footerText: b.footerText,
-    contactEmail: b.contactEmail,
-    websiteUrl: b.websiteUrl,
-    instagramUrl: b.instagramUrl,
-    facebookUrl: b.facebookUrl,
-    tiktokUrl: b.tiktokUrl,
-  };
 }

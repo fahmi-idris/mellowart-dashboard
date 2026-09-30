@@ -18,6 +18,12 @@ export default [
     route("email-templates", "routes/email-templates.tsx"),
   ]),
 
+  // Focused email editor: it owns its toolbar and deliberately omits the
+  // dashboard sidebar/header while retaining a refresh-safe URL.
+  route("email-templates/:eventSlug/:templateKey", "routes/email-templates.tsx", {
+    id: "routes/email-template-detail",
+  }),
+
   // JSON APIs (resource routes)
   route("api/inquiries", "routes/api.inquiries.tsx"), // admin-only list
   route("api/inquiries/:id", "routes/api.inquiry.$id.tsx"), // admin-only detail

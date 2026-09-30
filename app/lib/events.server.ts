@@ -1,10 +1,6 @@
 /** Events + per-event stall options: reads, counts, and stall CRUD. */
 
-import type {
-  EventSummary,
-  EventWithCounts,
-  StallOption,
-} from "~/lib/events";
+import type { EventSummary, EventWithCounts, StallOption } from "~/lib/events";
 
 const EVENT_COLUMNS =
   "id, webflow_id AS webflowId, name, slug, location, " +
@@ -15,9 +11,7 @@ const STALL_COLUMNS =
   "frontage, furniture, sharing, sort_order AS sortOrder";
 
 /** All events with applicant + awaiting-review counts, newest first. */
-export async function listEventsWithCounts(
-  db: D1Database,
-): Promise<EventWithCounts[]> {
+export async function listEventsWithCounts(db: D1Database): Promise<EventWithCounts[]> {
   const res = await db
     .prepare(
       `SELECT e.id, e.webflow_id AS webflowId, e.name, e.slug, e.location,
@@ -33,10 +27,22 @@ export async function listEventsWithCounts(
   return res.results ?? [];
 }
 
-export async function getEvent(
-  db: D1Database,
-  id: string,
-): Promise<EventSummary | null> {
+/** Cheap sidebar availability check; uses the same end-date rule as the template picker. */
+export async function hasEventAvailableForTemplates(db: D1Database): Promise<boolean> {
+  const today = new Date().toISOString().slice(0, 10);
+  const row = await db
+    .prepare(
+      `SELECT EXISTS(
+         SELECT 1 FROM events
+          WHERE ends_at IS NULL OR substr(ends_at, 1, 10) >= ?
+       ) AS available`,
+    )
+    .bind(today)
+    .first<{ available: number }>();
+  return row?.available === 1;
+}
+
+export async function getEvent(db: D1Database, id: string): Promise<EventSummary | null> {
   return db
     .prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE id = ?`)
     .bind(id)
@@ -52,10 +58,7 @@ export interface EventInput {
   endsAt?: string | null;
 }
 
-export async function createEvent(
-  db: D1Database,
-  input: EventInput,
-): Promise<string> {
+export async function createEvent(db: D1Database, input: EventInput): Promise<string> {
   const id = `EVT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   await db
     .prepare(
@@ -75,11 +78,7 @@ export async function createEvent(
   return id;
 }
 
-export async function updateEvent(
-  db: D1Database,
-  id: string,
-  input: EventInput,
-): Promise<boolean> {
+export async function updateEvent(db: D1Database, id: string, input: EventInput): Promise<boolean> {
   const res = await db
     .prepare(
       `UPDATE events
@@ -105,21 +104,12 @@ export async function updateEvent(
  * pointing at it have `event_id` set to NULL (FK) — applications are never
  * deleted by removing an event.
  */
-export async function deleteEvent(
-  db: D1Database,
-  id: string,
-): Promise<boolean> {
-  const res = await db
-    .prepare("DELETE FROM events WHERE id = ?")
-    .bind(id)
-    .run();
+export async function deleteEvent(db: D1Database, id: string): Promise<boolean> {
+  const res = await db.prepare("DELETE FROM events WHERE id = ?").bind(id).run();
   return (res.meta.changes ?? 0) > 0;
 }
 
-export async function listStallOptions(
-  db: D1Database,
-  eventId: string,
-): Promise<StallOption[]> {
+export async function listStallOptions(db: D1Database, eventId: string): Promise<StallOption[]> {
   const res = await db
     .prepare(
       `SELECT ${STALL_COLUMNS} FROM stall_options
@@ -131,10 +121,7 @@ export async function listStallOptions(
   return res.results ?? [];
 }
 
-export async function getStallOption(
-  db: D1Database,
-  id: string,
-): Promise<StallOption | null> {
+export async function getStallOption(db: D1Database, id: string): Promise<StallOption | null> {
   return db
     .prepare(`SELECT ${STALL_COLUMNS} FROM stall_options WHERE id = ?`)
     .bind(id)
@@ -153,9 +140,7 @@ export interface StallOptionInput {
 }
 
 /** Validate a stall-option form submission. Shared by the stall CRUD routes. */
-export function parseStallOptionForm(
-  form: FormData,
-): StallOptionInput | { error: string } {
+export function parseStallOptionForm(form: FormData): StallOptionInput | { error: string } {
   const tier = String(form.get("tier") ?? "").trim();
   const unitAmount = Number(form.get("unitAmount"));
   const currency = String(form.get("currency") ?? "")
@@ -242,27 +227,16 @@ export async function updateStallOption(
   return (res.meta.changes ?? 0) > 0;
 }
 
-export async function deleteStallOption(
-  db: D1Database,
-  id: string,
-): Promise<boolean> {
-  const res = await db
-    .prepare("DELETE FROM stall_options WHERE id = ?")
-    .bind(id)
-    .run();
+export async function deleteStallOption(db: D1Database, id: string): Promise<boolean> {
+  const res = await db.prepare("DELETE FROM stall_options WHERE id = ?").bind(id).run();
   return (res.meta.changes ?? 0) > 0;
 }
 
 /** Resolve an event slug (or Webflow Item ID / local id) to a local event id
  * (for the submit endpoint). */
-export async function findEventBySlug(
-  db: D1Database,
-  ref: string,
-): Promise<string | null> {
+export async function findEventBySlug(db: D1Database, ref: string): Promise<string | null> {
   const row = await db
-    .prepare(
-      "SELECT id FROM events WHERE slug = ? OR webflow_id = ? OR id = ? LIMIT 1",
-    )
+    .prepare("SELECT id FROM events WHERE slug = ? OR webflow_id = ? OR id = ? LIMIT 1")
     .bind(ref, ref, ref)
     .first<{ id: string }>();
   return row?.id ?? null;
@@ -279,9 +253,7 @@ export async function findStallByEventSlug(
   slug: string,
 ): Promise<string | null> {
   const row = await db
-    .prepare(
-      "SELECT id FROM stall_options WHERE event_id = ? AND slug = ? LIMIT 1",
-    )
+    .prepare("SELECT id FROM stall_options WHERE event_id = ? AND slug = ? LIMIT 1")
     .bind(eventId, slug)
     .first<{ id: string }>();
   return row?.id ?? null;
@@ -295,9 +267,7 @@ export async function findStallByEventSlug(
  * location, start/end dates). Events are managed in Webflow; the dashboard only
  * mirrors them, so until this is wired, seed the `events` table directly.
  */
-export async function syncEventsFromWebflow(
-  _env: Env,
-): Promise<{ synced: number }> {
+export async function syncEventsFromWebflow(_env: Env): Promise<{ synced: number }> {
   // TODO(phase-2): call Webflow CMS API and upsert by webflow_id.
   return { synced: 0 };
 }

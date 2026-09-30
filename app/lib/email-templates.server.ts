@@ -11,6 +11,7 @@ import type { OutgoingEmail } from "~/lib/gmail.server";
 import {
   DEFAULT_BRANDING,
   DEFAULT_TEMPLATES,
+  normalizeEmailBranding,
   type EmailBlock,
   type EmailBranding,
   type SummaryBlock,
@@ -62,7 +63,7 @@ function isHidden(block: EmailBlock, ctx: Record<string, string>): boolean {
 // Block rendering
 // ---------------------------------------------------------------------------
 
-const PAD = "padding:16px 40px 0";
+const PAD = "padding:16px 40px;";
 
 function renderSummary(
   block: SummaryBlock,
@@ -140,7 +141,7 @@ function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, s
       const linked = /^https?:\/\//i.test(rawLink)
         ? `<a href="${escapeHtml(rawLink)}" style="display:inline-block;text-decoration:none">${image}</a>`
         : image;
-      return `<div style="padding:20px 40px 4px;text-align:center">${linked}</div>`;
+      return `<div style="padding:20px 40px;text-align:center">${linked}</div>`;
     }
     case "heading":
       return `<div style="padding:22px 40px 0"><h2 style="margin:0;font-size:18px;font-weight:600;color:#2C2422">${interpolateHtml(block.text, ctx)}</h2></div>`;
@@ -161,14 +162,14 @@ function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, s
         block.variant === "outline"
           ? `${base};background:transparent;color:${br.buttonColor};border:1.5px solid ${br.buttonColor}`
           : `${base};background:${br.buttonColor};color:#fff`;
-      return `<div style="padding:20px 40px 4px"><a href="${url}" style="${style}">${interpolateHtml(block.label, ctx)}</a></div>`;
+      return `<div style="padding:20px 40px;"><a href="${url}" style="${style}">${interpolateHtml(block.label, ctx)}</a></div>`;
     }
     case "summary":
       return renderSummary(block, br, ctx);
     case "bank":
       return renderBank(br, ctx);
     case "divider":
-      return `<div style="padding:24px 40px 4px"><hr style="border:none;border-top:1px solid #F0EBE3;margin:0"/></div>`;
+      return `<div style="padding:24px 40px;"><hr style="border:none;border-top:1px solid #F0EBE3;margin:0"/></div>`;
     case "spacer": {
       const h = block.size === "lg" ? 32 : block.size === "sm" ? 8 : 16;
       return `<div style="height:${h}px"></div>`;
@@ -176,32 +177,41 @@ function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, s
   }
 }
 
-function shell(bodyHtml: string, br: EmailBranding): string {
-  const social = [
-    ["Instagram", br.instagramUrl],
-    ["Facebook", br.facebookUrl],
-    ["TikTok", br.tiktokUrl],
-  ]
-    .filter(([, u]) => u)
+function shell(bodyHtml: string, br: EmailBranding, preview = false): string {
+  const branding = normalizeEmailBranding(br);
+  const safeUrl = (value: string) => (/^https?:\/\//i.test(value.trim()) ? value.trim() : "");
+  const social = branding.socialLinks
+    .filter((link) => link.label.trim() && safeUrl(link.url))
     .map(
-      ([l, u]) =>
-        `<a href="${escapeHtml(u)}" style="color:#BEB5B2;font-size:12px;text-decoration:none;margin:0 8px">${l}</a>`,
+      (link) =>
+        `<a href="${escapeHtml(safeUrl(link.url))}" style="color:#BEB5B2;font-size:12px;text-decoration:none;margin:0 8px">${escapeHtml(link.label)}</a>`,
     )
     .join("");
+  const website = branding.socialLinks.find(
+    (link) => link.label.trim().toLowerCase() === "website",
+  );
+  const websiteUrl = website ? safeUrl(website.url) : "";
   const footerText = escapeHtml(br.footerText).replace(/\n/g, "<br/>");
   const footerBg = br.footerBg?.trim() || br.brandColor;
-  const footerLogo = br.footerLogoUrl?.trim() || br.logoUrl;
+  const headerLogo = safeUrl(br.logoUrl);
+  const footerLogo = safeUrl(br.footerLogoUrl);
+  const headerImage = headerLogo
+    ? `<img src="${escapeHtml(headerLogo)}" alt="${escapeHtml(br.fromName)}" style="${branding.headerLogoWidth ? `width:${branding.headerLogoWidth}px;max-width:100%;height:auto` : "height:44px;width:auto"}"/>`
+    : `<strong style="font-size:22px;letter-spacing:.08em;color:${br.brandColor}">${escapeHtml(br.fromName)}</strong>`;
+  const footerImage = footerLogo
+    ? `<img src="${escapeHtml(footerLogo)}" alt="${escapeHtml(br.fromName)}" style="height:32px;width:auto;margin-bottom:14px;opacity:.9"/>`
+    : "";
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
-<body style="margin:0;background:#F5F5F0;padding:40px 16px;font-family:'Helvetica Neue',Arial,sans-serif;color:#2C2422">
-  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,.06)">
-    <div style="background:${br.headerBg};padding:28px 40px;text-align:center;border-bottom:1px solid #F0EBE3">
-      <img src="${escapeHtml(br.logoUrl)}" alt="${escapeHtml(br.fromName)}" style="height:44px;width:auto"/>
+<body style="margin:0;background:#F5F5F0;font-family:'Helvetica Neue',Arial,sans-serif;color:#2C2422;">
+  <div style="max-width:720px;margin:0 auto;">
+    <div${preview ? ' data-email-branding="Header"' : ""} style="background:${br.headerBg};padding:28px 40px;text-align:center;border-bottom:1px solid #F0EBE3">
+      ${headerImage}
     </div>
     <div style="padding:0 0 28px">${bodyHtml}</div>
-    <div style="background:${footerBg};padding:28px 40px;text-align:center">
-      <img src="${escapeHtml(footerLogo)}" alt="${escapeHtml(br.fromName)}" style="height:32px;width:auto;margin-bottom:14px;opacity:.9"/>
+    <div${preview ? ' data-email-branding="Footer"' : ""} style="background:${footerBg};padding:28px 40px;text-align:center">
+      ${footerImage}
       <div style="margin:12px 0">${social}</div>
-      <p style="font-size:12px;color:#7A6E6C;line-height:1.7;margin:0"><a href="${escapeHtml(br.websiteUrl)}" style="color:#BEB5B2;text-decoration:none">${escapeHtml(br.websiteUrl)}</a><br/>${escapeHtml(br.contactEmail)}<br/><br/>${footerText}</p>
+      <p style="font-size:12px;color:#7A6E6C;line-height:1.7;margin:0">${websiteUrl ? `<a href="${escapeHtml(websiteUrl)}" style="color:#BEB5B2;text-decoration:none">${escapeHtml(websiteUrl)}</a><br/>` : ""}${escapeHtml(br.contactEmail)}<br/><br/>${footerText}</p>
     </div>
   </div>
 </body></html>`;
@@ -230,7 +240,7 @@ export function renderContent(
   const subject = interpolateRaw(content.subject, withDefaults)
     .replace(/[\r\n]+/g, " ")
     .trim();
-  return { subject, html: preheaderHtml + shell(body, br) };
+  return { subject, html: preheaderHtml + shell(body, br, options.includeBlockMarkers) };
 }
 
 // ---------------------------------------------------------------------------
@@ -251,28 +261,50 @@ function isTemplateKey(k: string): k is TemplateKey {
 }
 
 /** Saved template for a key, or the code default when unsaved/malformed. */
-export async function getTemplate(db: D1Database, key: TemplateKey): Promise<TemplateContent> {
-  const row = await db
+export async function getTemplate(
+  db: D1Database,
+  key: TemplateKey,
+  eventId?: string | null,
+): Promise<TemplateContent> {
+  const parseRow = (row: TemplateRow | null): TemplateContent | null => {
+    if (!row) return null;
+    try {
+      const blocks = JSON.parse(row.blocks) as unknown;
+      if (!Array.isArray(blocks)) return null;
+      return {
+        subject: row.subject,
+        preheader: row.preheader ?? "",
+        blocks: blocks as EmailBlock[],
+      };
+    } catch {
+      return null;
+    }
+  };
+  const eventRow = eventId
+    ? await db
+        .prepare(
+          "SELECT subject, preheader, blocks FROM event_email_templates WHERE event_id = ? AND key = ?",
+        )
+        .bind(eventId, key)
+        .first<TemplateRow>()
+    : null;
+  const scoped = parseRow(eventRow);
+  if (scoped) return scoped;
+  const globalRow = await db
     .prepare("SELECT subject, preheader, blocks FROM email_templates WHERE key = ?")
     .bind(key)
     .first<TemplateRow>();
-  if (!row) return DEFAULT_TEMPLATES[key];
-  try {
-    const blocks = JSON.parse(row.blocks) as EmailBlock[];
-    if (!Array.isArray(blocks)) return DEFAULT_TEMPLATES[key];
-    return { subject: row.subject, preheader: row.preheader ?? "", blocks };
-  } catch {
-    return DEFAULT_TEMPLATES[key];
-  }
+  return parseRow(globalRow) ?? DEFAULT_TEMPLATES[key];
 }
 
 export async function getAllTemplates(
   db: D1Database,
+  eventId?: string | null,
 ): Promise<Record<TemplateKey, TemplateContent>> {
   const out = {} as Record<TemplateKey, TemplateContent>;
   await Promise.all(
     TEMPLATE_KEYS.map(async (k) => {
-      out[k] = await getTemplate(db, k);
+      out[k] = await getTemplate(db, k, eventId);
     }),
   );
   return out;
@@ -283,7 +315,29 @@ export async function saveTemplate(
   key: TemplateKey,
   content: TemplateContent,
   updatedBy: string,
+  eventId?: string | null,
 ): Promise<void> {
+  if (eventId) {
+    await db
+      .prepare(
+        `INSERT INTO event_email_templates (event_id, key, subject, preheader, blocks, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
+         ON CONFLICT(event_id, key) DO UPDATE SET
+           subject = excluded.subject, preheader = excluded.preheader,
+           blocks = excluded.blocks, updated_at = datetime('now'),
+           updated_by = excluded.updated_by`,
+      )
+      .bind(
+        eventId,
+        key,
+        content.subject,
+        content.preheader || null,
+        JSON.stringify(content.blocks),
+        updatedBy,
+      )
+      .run();
+    return;
+  }
   await db
     .prepare(
       `INSERT INTO email_templates (key, subject, preheader, blocks, updated_at, updated_by)
@@ -305,7 +359,20 @@ export async function saveTemplate(
     .run();
 }
 
-export async function getBranding(db: D1Database): Promise<EmailBranding> {
+export async function getBranding(db: D1Database, eventId?: string | null): Promise<EmailBranding> {
+  if (eventId) {
+    const override = await db
+      .prepare("SELECT branding FROM event_email_branding WHERE event_id = ?")
+      .bind(eventId)
+      .first<{ branding: string }>();
+    if (override) {
+      try {
+        return normalizeEmailBranding(JSON.parse(override.branding) as Partial<EmailBranding>);
+      } catch {
+        // A malformed override must not interrupt sending; use global branding.
+      }
+    }
+  }
   const row = await db
     .prepare(
       `SELECT from_name AS fromName, logo_url AS logoUrl, brand_color AS brandColor,
@@ -317,11 +384,26 @@ export async function getBranding(db: D1Database): Promise<EmailBranding> {
               tiktok_url AS tiktokUrl
        FROM email_branding WHERE id = 1`,
     )
-    .first<EmailBranding>();
-  return row ?? DEFAULT_BRANDING;
+    .first<Partial<EmailBranding>>();
+  return normalizeEmailBranding(row ?? {});
 }
 
-export async function updateBranding(db: D1Database, br: EmailBranding): Promise<void> {
+export async function updateBranding(
+  db: D1Database,
+  br: EmailBranding,
+  eventId?: string | null,
+): Promise<void> {
+  if (eventId) {
+    await db
+      .prepare(
+        `INSERT INTO event_email_branding (event_id, branding, updated_at)
+         VALUES (?, ?, datetime('now'))
+         ON CONFLICT(event_id) DO UPDATE SET branding = excluded.branding, updated_at = datetime('now')`,
+      )
+      .bind(eventId, JSON.stringify(br))
+      .run();
+    return;
+  }
   await db
     .prepare(
       `INSERT INTO email_branding
@@ -358,6 +440,43 @@ export async function updateBranding(db: D1Database, br: EmailBranding): Promise
     .run();
 }
 
+/** Publish an event's template and shared brand style as one D1 transaction. */
+export async function publishEventTemplate(
+  db: D1Database,
+  eventId: string,
+  key: TemplateKey,
+  content: TemplateContent,
+  branding: EmailBranding,
+  updatedBy: string,
+): Promise<void> {
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO event_email_templates (event_id, key, subject, preheader, blocks, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
+         ON CONFLICT(event_id, key) DO UPDATE SET
+           subject = excluded.subject, preheader = excluded.preheader,
+           blocks = excluded.blocks, updated_at = datetime('now'),
+           updated_by = excluded.updated_by`,
+      )
+      .bind(
+        eventId,
+        key,
+        content.subject,
+        content.preheader || null,
+        JSON.stringify(content.blocks),
+        updatedBy,
+      ),
+    db
+      .prepare(
+        `INSERT INTO event_email_branding (event_id, branding, updated_at)
+         VALUES (?, ?, datetime('now'))
+         ON CONFLICT(event_id) DO UPDATE SET branding = excluded.branding, updated_at = datetime('now')`,
+      )
+      .bind(eventId, JSON.stringify(branding)),
+  ]);
+}
+
 /**
  * Load a template + branding and render it with the given merge context.
  * Guarded: any failure falls back to the code default so a send never breaks.
@@ -366,8 +485,12 @@ export async function renderTemplate(
   db: D1Database,
   key: TemplateKey,
   ctx: Record<string, string>,
+  eventId?: string | null,
 ): Promise<OutgoingEmail> {
-  const [branding, content] = await Promise.all([getBranding(db), getTemplate(db, key)]);
+  const [branding, content] = await Promise.all([
+    getBranding(db, eventId),
+    getTemplate(db, key, eventId),
+  ]);
   let rendered: { subject: string; html: string };
   try {
     rendered = renderContent(content, branding, ctx);
