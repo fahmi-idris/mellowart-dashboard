@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 
 import type { Route } from "./+types/email-templates";
+import { EventCombobox } from "~/components/event-combobox";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card } from "~/components/ui/card";
@@ -360,25 +361,13 @@ export default function EmailTemplates({ loaderData }: Route.ComponentProps) {
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span>Event</span>
-          <Select
+          <EventCombobox
+            events={events}
             value={event?.id}
             disabled={events.length === 0}
             onValueChange={(eventId) => setSearchParams({ event: eventId })}
-          >
-            <SelectTrigger
-              className="w-72 max-w-full bg-background"
-              aria-label="Email template event"
-            >
-              <SelectValue placeholder="No event found" />
-            </SelectTrigger>
-            <SelectContent>
-              {events.map((option: EventWithCounts) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            className="w-72 max-w-full bg-background"
+          />
         </div>
       </div>
       {event ? (
@@ -635,6 +624,9 @@ function TemplateEditor({
   >(null);
   const previewIframe = useRef<HTMLIFrameElement | null>(null);
   const previewActionRef = useRef<(id: string, action: string) => void>(() => {});
+  const reorderPreviewRef = useRef<
+    (sourceId: string, targetId: string, position: BlockDropPosition) => void
+  >(() => {});
   const previewScrollTop = useRef(0);
   const pendingPreviewBlockId = useRef<string | null | undefined>(undefined);
   const pendingSavedContent = useRef<TemplateContent | null>(null);
@@ -701,13 +693,55 @@ function TemplateEditor({
     if (!document || !frameWindow) return;
 
     const style = document.createElement("style");
-    style.textContent = `[data-email-block-id]{cursor:pointer;position:relative} [data-email-block-id]:hover{outline:2px solid #a3a3a3;outline-offset:-2px} [data-email-block-id].email-block-selected{outline:2px solid #2C2422;outline-offset:-2px} [data-email-branding]{position:relative;cursor:pointer} [data-email-branding]:hover{outline:2px dashed #a8a29e;outline-offset:-2px} [data-email-branding]:hover:after{content:'Shared branding — click to edit';position:absolute;right:8px;top:8px;background:white;color:#2C2422;border:1px solid #ddd;border-radius:99px;padding:5px 9px;font:11px Arial;box-shadow:0 2px 8px #0002} [data-editor-toolbar]{position:absolute;right:0;top:-30px;z-index:10;display:flex;gap:2px;background:#2C2422;color:white;border-radius:8px 8px 0 0;padding:3px} [data-editor-toolbar] button{display:flex;align-items:center;justify-content:center;width:26px;height:24px;border:0;background:transparent;color:white;cursor:pointer} [data-editor-toolbar] button:hover{background:#ffffff30;border-radius:4px} [data-editor-label]{position:absolute;left:0;top:-30px;z-index:10;background:#2C2422;color:white;border-radius:8px 8px 0 0;padding:7px 9px;font:11px Arial}`;
+    style.textContent = `[data-email-block-id]{cursor:grab;position:relative} [data-email-block-id]:active{cursor:grabbing} [data-email-block-id]:hover{outline:2px solid #a3a3a3;outline-offset:-2px} [data-email-block-id].email-block-selected{outline:2px solid #2C2422;outline-offset:-2px} [data-email-block-id].email-drop-before{box-shadow:inset 0 4px #7c3aed} [data-email-block-id].email-drop-after{box-shadow:inset 0 -4px #7c3aed} [data-email-branding]{position:relative;cursor:pointer} [data-email-branding]:hover{outline:2px dashed #a8a29e;outline-offset:-2px} [data-email-branding]:hover:after{content:'Shared branding — click to edit';position:absolute;right:8px;top:8px;background:white;color:#2C2422;border:1px solid #ddd;border-radius:99px;padding:5px 9px;font:11px Arial;box-shadow:0 2px 8px #0002} [data-editor-toolbar]{position:absolute;right:0;top:-30px;z-index:10;display:flex;gap:2px;background:#2C2422;color:white;border-radius:8px 8px 0 0;padding:3px} [data-editor-toolbar] button{display:flex;align-items:center;justify-content:center;width:26px;height:24px;border:0;background:transparent;color:white;cursor:pointer} [data-editor-toolbar] button:hover{background:#ffffff30;border-radius:4px} [data-editor-label]{position:absolute;left:0;top:-30px;z-index:10;background:#2C2422;color:white;border-radius:8px 8px 0 0;padding:7px 9px;font:11px Arial}`;
     document.head.appendChild(style);
-    document.querySelectorAll<HTMLElement>("[data-email-block-id]").forEach((element) => {
+    const previewBlocks = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-email-block-id]"),
+    );
+    const clearDropIndicators = () => {
+      previewBlocks.forEach((element) =>
+        element.classList.remove("email-drop-before", "email-drop-after"),
+      );
+    };
+    previewBlocks.forEach((element) => {
       element.classList.toggle(
         "email-block-selected",
         element.dataset.emailBlockId === selectedBlockRef.current,
       );
+      element.draggable = true;
+      element.addEventListener("dragstart", (event) => {
+        const id = element.dataset.emailBlockId;
+        if (!id || !event.dataTransfer) return;
+        event.dataTransfer.setData("text/plain", id);
+        event.dataTransfer.effectAllowed = "move";
+        setDraggedBlockId(id);
+      });
+      element.addEventListener("dragover", (event) => {
+        if (!event.dataTransfer) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        clearDropIndicators();
+        const position =
+          event.clientY <
+          element.getBoundingClientRect().top + element.getBoundingClientRect().height / 2
+            ? "before"
+            : "after";
+        element.classList.add(position === "before" ? "email-drop-before" : "email-drop-after");
+      });
+      element.addEventListener("drop", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const sourceId = event.dataTransfer?.getData("text/plain");
+        const targetId = element.dataset.emailBlockId;
+        const position = element.classList.contains("email-drop-after") ? "after" : "before";
+        clearDropIndicators();
+        if (sourceId && targetId) reorderPreviewRef.current(sourceId, targetId, position);
+        setDraggedBlockId(null);
+      });
+      element.addEventListener("dragend", () => {
+        clearDropIndicators();
+        setDraggedBlockId(null);
+      });
     });
     document.addEventListener("click", (event) => {
       event.preventDefault();
@@ -857,6 +891,26 @@ function TemplateEditor({
 
   const setBlocks = (blocks: EmailBlock[]) => update({ blocks });
 
+  const reorderBlock = (sourceId: string, targetId: string, position: BlockDropPosition) => {
+    const next = reorderEmailBlocks(content.blocks, sourceId, targetId, position);
+    if (
+      next === content.blocks ||
+      next.every((block, index) => block.id === content.blocks[index].id)
+    )
+      return;
+    const block = next.find((item) => item.id === sourceId);
+    setSelectedBlockId(sourceId);
+    setInspectorTab("block");
+    pendingPreviewBlockId.current = sourceId;
+    if (block) {
+      setMoveAnnouncement(
+        `${BLOCK_LABELS[block.type]} block moved to position ${next.findIndex((item) => item.id === sourceId) + 1} of ${next.length}.`,
+      );
+    }
+    setBlocks(next);
+  };
+  reorderPreviewRef.current = reorderBlock;
+
   const updateBlock = (id: string, patch: Record<string, unknown>) => {
     pendingPreviewBlockId.current = id;
     setBlocks(content.blocks.map((b) => (b.id === id ? ({ ...b, ...patch } as EmailBlock) : b)));
@@ -954,18 +1008,15 @@ function TemplateEditor({
         <span className="font-semibold">{meta.label}</span>
         <Badge variant="secondary">Active</Badge>
         <span className="ml-2 text-xs text-muted-foreground">Event</span>
-        <Select value={event.slug} onValueChange={onSelectEvent}>
-          <SelectTrigger className="h-8 max-w-72 text-xs" aria-label="Email template event">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {events.map((option) => (
-              <SelectItem key={option.id} value={option.slug}>
-                {option.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <EventCombobox
+          events={events}
+          value={event.id}
+          onValueChange={(id) => {
+            const selected = events.find((option) => option.id === id);
+            if (selected) onSelectEvent(selected.slug);
+          }}
+          className="h-8 max-w-72 text-xs"
+        />
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {(isDirty || isBrandingDirty) && <Badge variant="outline">Unsaved changes</Badge>}
           <Button variant="outline" size="sm" onClick={() => setPreviewMode((value) => !value)}>
@@ -1102,6 +1153,7 @@ function TemplateEditor({
                       draggable
                       onDragStart={(event) => {
                         event.dataTransfer.setData("text/plain", block.id);
+                        event.dataTransfer.effectAllowed = "move";
                         setDraggedBlockId(block.id);
                       }}
                       onDragEnd={() => {
@@ -1110,12 +1162,25 @@ function TemplateEditor({
                       }}
                       onDragOver={(event) => {
                         event.preventDefault();
-                        setDropTarget({ id: block.id, position: "before" });
+                        event.dataTransfer.dropEffect = "move";
+                        const position =
+                          event.clientY <
+                          event.currentTarget.getBoundingClientRect().top +
+                            event.currentTarget.getBoundingClientRect().height / 2
+                            ? "before"
+                            : "after";
+                        setDropTarget({ id: block.id, position });
                       }}
                       onDrop={(event) => {
                         event.preventDefault();
                         const sourceId = draggedBlockId || event.dataTransfer.getData("text/plain");
-                        setBlocks(reorderEmailBlocks(content.blocks, sourceId, block.id, "before"));
+                        const position =
+                          event.clientY <
+                          event.currentTarget.getBoundingClientRect().top +
+                            event.currentTarget.getBoundingClientRect().height / 2
+                            ? "before"
+                            : "after";
+                        reorderBlock(sourceId, block.id, position);
                         setDraggedBlockId(null);
                         setDropTarget(null);
                       }}
@@ -1130,7 +1195,10 @@ function TemplateEditor({
                       className={cn(
                         "flex items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-muted",
                         selectedBlockId === block.id && "bg-muted font-semibold",
-                        dropTarget?.id === block.id && "ring-2 ring-primary",
+                        dropTarget?.id === block.id &&
+                          (dropTarget.position === "before"
+                            ? "border-t-2 border-t-primary"
+                            : "border-b-2 border-b-primary"),
                       )}
                     >
                       <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />{" "}

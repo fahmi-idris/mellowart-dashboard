@@ -48,7 +48,7 @@ export const TEMPLATE_META: Record<
   },
   withdrawn: {
     label: "Withdrawn",
-    description: "Sent manually after an application is marked withdrawn.",
+    description: "Sent manually after an application is marked withdrawn. Optional reason.",
     trigger: "Manual action · Withdrawn",
   },
 };
@@ -492,6 +492,13 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
         id: "body",
         type: "paragraph",
         text: "Your application (**{{reference}}**) has been marked as withdrawn. It will no longer be considered for this event. If this was a mistake, please reply to this email.",
+      }),
+      b({
+        id: "reason",
+        type: "summary",
+        label: "Reason",
+        rows: [{ label: "", value: "{{reason}}" }],
+        hideIfEmpty: "{{reason}}",
       }),
     ],
   },

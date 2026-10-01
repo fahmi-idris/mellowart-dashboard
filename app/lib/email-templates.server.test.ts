@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_BRANDING,
+  DEFAULT_TEMPLATES,
   normalizeEmailBranding,
   reorderEmailBlocks,
   type TemplateContent,
@@ -22,6 +23,18 @@ const content = (blocks: TemplateContent["blocks"]): TemplateContent => ({
 });
 
 describe("renderContent", () => {
+  it("includes an optional withdrawal reason only when supplied", () => {
+    const context = { firstName: "Ada", reference: "ART-1", reason: "Requested by applicant" };
+    const withReason = renderContent(DEFAULT_TEMPLATES.withdrawn, DEFAULT_BRANDING, context);
+    const withoutReason = renderContent(DEFAULT_TEMPLATES.withdrawn, DEFAULT_BRANDING, {
+      ...context,
+      reason: "",
+    });
+    expect(withReason.html).toContain("Requested by applicant");
+    expect(withoutReason.html).not.toContain("Requested by applicant");
+    expect(withoutReason.html).not.toContain(">Reason<");
+  });
+
   it("interpolates merge tags into subject and body", () => {
     const { subject, html } = renderContent(
       content([{ id: "p", type: "paragraph", text: "Hello {{name}}" }]),

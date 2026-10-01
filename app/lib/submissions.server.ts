@@ -156,6 +156,8 @@ export interface SubmissionDetail {
   status: string;
   rejectReason: string | null;
   waitlistReason: string | null;
+  withdrawnReason: string | null;
+  decisionEmailSentAt: string | null;
   stallOptionId: string | null;
   stallTier: string | null;
   paymentStatus: string;
@@ -197,6 +199,8 @@ export async function getSubmissionDetail(
               s.event_id AS eventId, e.name AS eventName,
               s.status, s.reject_reason AS rejectReason,
               s.waitlist_reason AS waitlistReason,
+              s.withdrawn_reason AS withdrawnReason,
+              s.decision_email_sent_at AS decisionEmailSentAt,
               s.stall_option_id AS stallOptionId, o.tier AS stallTier,
               s.payment_status AS paymentStatus, s.created_at AS submittedAt,
               s.second_artist_first_name AS secondFirstName,
@@ -266,6 +270,8 @@ export interface SubmissionExportRow {
   status: string;
   rejectReason: string | null;
   waitlistReason: string | null;
+  withdrawnReason: string | null;
+  decisionEmailSentAt: string | null;
   decidedBy: string | null;
   decidedAt: string | null;
   stallOptionId: string | null;
@@ -395,6 +401,8 @@ export async function getSubmissionsForExport(
               s.event_id AS eventId, e.name AS eventName,
               s.status, s.reject_reason AS rejectReason,
               s.waitlist_reason AS waitlistReason,
+              s.withdrawn_reason AS withdrawnReason,
+              s.decision_email_sent_at AS decisionEmailSentAt,
               s.decided_by AS decidedBy, s.decided_at AS decidedAt,
               s.stall_option_id AS stallOptionId, o.tier AS stallTier,
               s.payment_status AS paymentStatus, s.xero_invoice_id AS xeroInvoiceId,

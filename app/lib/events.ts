@@ -20,12 +20,27 @@ export interface EventWithCounts extends EventSummary {
   awaitingReview: number;
 }
 
-/** An event can have templates while it is upcoming or has not ended. */
+export type EventPhase = "upcoming" | "ongoing" | "inactive" | "unscheduled";
+
+/** Date-only event lifecycle. End dates remain active through their final day. */
+export function getEventPhase(
+  event: Partial<Pick<EventSummary, "startsAt" | "endsAt">>,
+  today = new Date().toISOString().slice(0, 10),
+): EventPhase {
+  const start = event.startsAt?.slice(0, 10);
+  const end = event.endsAt?.slice(0, 10);
+  if (end && end < today) return "inactive";
+  if (start && start > today) return "upcoming";
+  if (!start && !end) return "unscheduled";
+  return "ongoing";
+}
+
+/** Upcoming, ongoing, and undated events remain available for templates. */
 export function isEventAvailableForTemplates(
-  event: Pick<EventSummary, "endsAt">,
+  event: Partial<Pick<EventSummary, "startsAt" | "endsAt">>,
   today = new Date().toISOString().slice(0, 10),
 ): boolean {
-  return !event.endsAt || event.endsAt.slice(0, 10) >= today;
+  return getEventPhase(event, today) !== "inactive";
 }
 
 export interface StallOption {

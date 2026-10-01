@@ -1,5 +1,14 @@
 import { env } from "cloudflare:workers";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
@@ -53,6 +62,8 @@ import {
 import { Skeleton } from "~/components/ui/skeleton";
 import { Textarea } from "~/components/ui/textarea";
 import { requireAdmin } from "~/lib/auth.server";
+import { applySentDecisionToCache } from "~/lib/decision-email.client";
+import { sendDecisionEmail, type DecisionEmailResult } from "~/lib/decision-email.server";
 import {
   DEFAULT_PAGE_SIZE,
   listQueryToSearchParams,
@@ -62,12 +73,7 @@ import {
 } from "~/lib/data-table";
 import { listEventsWithCounts, listStallOptions } from "~/lib/events.server";
 import type { EventWithCounts, StallOption } from "~/lib/events";
-import {
-  createInvoiceForSubmission,
-  sendRejectionEmail,
-  sendWaitlistEmail,
-  sendWithdrawnEmail,
-} from "~/lib/jobs.server";
+import { createInvoiceForSubmission } from "~/lib/jobs.server";
 import {
   assignStall,
   cancelInvoicing,
@@ -106,6 +112,7 @@ type Artist = {
   brandName: string | null;
   primaryCategory: string | null;
   secondaryCategory: string | null;
+  productDescription: string | null;
   sharingStall: string | null;
   hasInsurance: string | null;
   appliedBefore: string | null;
@@ -117,6 +124,8 @@ type Artist = {
   paymentStatus: PaymentStatus;
   invoiceUrl: string | null;
   rejectReason: string | null;
+  withdrawnReason: string | null;
+  decisionEmailSentAt: string | null;
   internalNotes: string | null;
   archivedAt: string | null;
   submittedAt: string;
@@ -160,6 +169,18 @@ type ArtistDetail = Artist & {
   secondProductDescription: string | null;
   images: DetailImage[];
 };
+
+type DecisionEmailControls = {
+  send: (artist: Artist) => Promise<void>;
+  sendingId: string | null;
+};
+const DecisionEmailContext = createContext<DecisionEmailControls | null>(null);
+
+function useDecisionEmailControls() {
+  const controls = useContext(DecisionEmailContext);
+  if (!controls) throw new Error("Decision email controls are unavailable");
+  return controls;
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAdmin(request);
@@ -260,9 +281,12 @@ export async function action({ request }: Route.ActionArgs) {
         if (!isApplicationStatus(status)) {
           return { ok: false, message: "Unknown status." };
         }
-        // Optional decision note — attached to rejected/waitlisted only.
+        // Optional decision note — attached to rejection, waitlist, or withdrawal.
         const reason = String(form.get("reason") ?? "").trim() || null;
-        const decisionReason = status === "rejected" || status === "waitlisted" ? reason : null;
+        const decisionReason =
+          status === "rejected" || status === "waitlisted" || status === "withdrawn"
+            ? reason
+            : null;
         const changed = await setApplicationStatus(
           env.DB,
           id,
@@ -271,85 +295,46 @@ export async function action({ request }: Route.ActionArgs) {
           decisionReason,
         );
         if (changed) {
-          const { name } = await submissionSubject(id);
-          const phrase: Record<string, string> = {
-            accepted: `${name} application approved`,
-            waitlisted: `${name} application waitlisted`,
-            rejected: `${name} application rejected`,
-            withdrawn: `${name} application withdrawn`,
-            pending: `${name} moved back to pending`,
-          };
-          await logActivity(env.DB, {
-            actorId: session.sub,
-            actorEmail: session.email,
-            submissionId: id,
-            subject: name,
-            type: status === "accepted" ? "approved" : status,
-            message: phrase[status] ?? `${name} ${status}`,
-          });
+          try {
+            const { name } = await submissionSubject(id);
+            const phrase: Record<string, string> = {
+              accepted: `${name} application approved`,
+              waitlisted: `${name} application waitlisted`,
+              rejected: `${name} application rejected`,
+              withdrawn: `${name} application withdrawn`,
+              pending: `${name} moved back to pending`,
+            };
+            await logActivity(env.DB, {
+              actorId: session.sub,
+              actorEmail: session.email,
+              submissionId: id,
+              subject: name,
+              type: status === "accepted" ? "approved" : status,
+              message: phrase[status] ?? `${name} ${status}`,
+            });
+          } catch (err) {
+            // The decision is already saved; activity logging must not turn it
+            // into an apparent failure and restore stale UI state.
+            console.error("Could not log application decision", { id, status, err });
+          }
         }
         return changed
-          ? { ok: true, message: `${id} set to ${APPLICATION_LABEL[status]}.` }
+          ? {
+              ok: true,
+              intent: "set_status",
+              id,
+              status,
+              decisionEmailSentAt: null,
+              rejectReason: status === "rejected" ? decisionReason : null,
+              waitlistReason: status === "waitlisted" ? decisionReason : null,
+              withdrawnReason: status === "withdrawn" ? decisionReason : null,
+              message: `${id} set to ${APPLICATION_LABEL[status]}.`,
+            }
           : { ok: false, message: `Could not update ${id}.` };
       }
 
       case "send_decision_email": {
-        const decision = await env.DB.prepare(
-          `SELECT status, reject_reason AS rejectReason,
-                  waitlist_reason AS waitlistReason
-             FROM submissions
-            WHERE id = ?`,
-        )
-          .bind(id)
-          .first<{
-            status: string;
-            rejectReason: string | null;
-            waitlistReason: string | null;
-          }>();
-
-        if (
-          !decision ||
-          !["rejected", "waitlisted", "withdrawn"].includes(decision.status) ||
-          decision.status !== String(form.get("status") ?? "")
-        ) {
-          return {
-            ok: false,
-            message: `${id} changed status. Refresh the row before sending an email.`,
-          };
-        }
-
-        const sent =
-          decision.status === "rejected"
-            ? await sendRejectionEmail(env, id, decision.rejectReason)
-            : decision.status === "waitlisted"
-              ? await sendWaitlistEmail(env, id, decision.waitlistReason)
-              : await sendWithdrawnEmail(env, id);
-        if (!sent) {
-          return {
-            ok: false,
-            message: `Could not send the email for ${id}. Check the Google connection and try again.`,
-          };
-        }
-
-        const { name } = await submissionSubject(id);
-        const decisionLabel =
-          decision.status === "rejected"
-            ? "rejection"
-            : decision.status === "waitlisted"
-              ? "waitlist"
-              : "withdrawal";
-        await logActivity(env.DB, {
-          actorId: session.sub,
-          actorEmail: session.email,
-          submissionId: id,
-          subject: name,
-          type: "email_sent",
-          message: `${name} ${decisionLabel} email sent`,
-        });
-        return {
-          ok: true,
-          message: `${APPLICATION_LABEL[decision.status as ApplicationStatus]} email sent to ${name}.`,
-        };
+        return sendDecisionEmail(env, session, id, String(form.get("status") ?? ""));
       }
 
       case "assign_stall": {
@@ -520,20 +505,45 @@ function useRowAction() {
 
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (fetcher.data.ok) {
-      toast.success(fetcher.data.message);
-      if ("notes" in fetcher.data && typeof fetcher.data.id === "string") {
+    const data = fetcher.data;
+    if (data.ok) {
+      toast.success(data.message);
+      if ("notes" in data && typeof data.id === "string") {
         // The action returns the saved value. Keep the optimistic list row in
         // place instead of replacing it with a possibly older list refetch.
-        const { id, notes } = fetcher.data;
+        const { id, notes } = data;
         patchRow(id, { internalNotes: notes ?? null });
+      } else if (
+        data.intent === "set_status" &&
+        typeof data.id === "string" &&
+        isApplicationStatus(data.status)
+      ) {
+        patchRow(data.id, {
+          status: data.status,
+          decisionEmailSentAt: null,
+          rejectReason: data.rejectReason ?? null,
+          withdrawnReason: data.withdrawnReason ?? null,
+        });
+        queryClient.setQueryData<ArtistDetail>(["inquiry", data.id], (old) =>
+          old ? { ...old, waitlistReason: data.waitlistReason ?? null } : old,
+        );
+      } else if (
+        data.intent === "send_decision_email" &&
+        typeof data.id === "string" &&
+        typeof data.decisionEmailSentAt === "string" &&
+        isApplicationStatus(data.status)
+      ) {
+        patchRow(data.id, {
+          status: data.status,
+          decisionEmailSentAt: data.decisionEmailSentAt,
+        });
       } else {
         queryClient.invalidateQueries({ queryKey: ["inquiries"] });
         queryClient.invalidateQueries({ queryKey: ["inquiry"] });
       }
       queryClient.invalidateQueries({ queryKey: ["summary"] });
     } else {
-      toast.error(fetcher.data.message);
+      toast.error(data.message);
       // Reconcile failed optimistic changes even if the row was unmounted.
       queryClient.invalidateQueries({ queryKey: ["inquiries"] });
       queryClient.invalidateQueries({ queryKey: ["inquiry"] });
@@ -575,7 +585,7 @@ function Pill({ className, children }: { className?: string; children: ReactNode
   );
 }
 
-// Reject and waitlist both prompt for an optional note before applying.
+// Decisions with an optional applicant-facing reason prompt before applying.
 const REASON_DECISIONS = {
   rejected: {
     title: "Reject submission",
@@ -591,24 +601,31 @@ const REASON_DECISIONS = {
     variant: "default" as const,
     placeholder: "e.g. Strong application — holding for a later spot",
   },
+  withdrawn: {
+    title: "Withdraw submission",
+    verb: "withdrawing",
+    confirm: "Confirm withdrawal",
+    variant: "default" as const,
+    placeholder: "e.g. Withdrawn at the applicant’s request",
+  },
 } as const;
 
 type ReasonDecision = keyof typeof REASON_DECISIONS;
 
 function ApplicationStatusCell({ artist }: { artist: Artist }) {
   const { fetcher, submit, patchRow } = useRowAction();
-  // Rejecting or waitlisting opens a dialog for an optional note first.
+  // Rejection, waitlist, and withdrawal open a dialog for an optional note.
   const [reasonFor, setReasonFor] = useState<ReasonDecision | null>(null);
 
   function onChange(value: string) {
     if (value === artist.status) return;
-    if (value === "rejected" || value === "waitlisted") {
+    if (value === "rejected" || value === "waitlisted" || value === "withdrawn") {
       setReasonFor(value);
       return;
     }
     submit(
       { intent: "set_status", id: artist.id, status: value },
-      { status: value as ApplicationStatus },
+      { status: value as ApplicationStatus, decisionEmailSentAt: null },
     );
   }
 
@@ -645,15 +662,15 @@ function ApplicationStatusCell({ artist }: { artist: Artist }) {
             <DialogDescription>
               Optionally add a reason for {copy.verb}{" "}
               <span className="font-medium text-foreground">{artist.name}</span>. The decision is
-              saved without sending an email. If provided, this reason will be included when you
-              send the notification later.
+              saved without sending an email. The reason is available to the email template as{" "}
+              <code>{"{{reason}}"}</code> when you send the notification later.
             </DialogDescription>
           </DialogHeader>
           <fetcher.Form
             method="post"
             className="grid gap-4"
             onSubmit={() => {
-              if (reasonFor) patchRow(artist.id, { status: reasonFor });
+              if (reasonFor) patchRow(artist.id, { status: reasonFor, decisionEmailSentAt: null });
               setReasonFor(null);
             }}
           >
@@ -686,8 +703,15 @@ function ApplicationStatusCell({ artist }: { artist: Artist }) {
 
 function DecisionEmailButton({ artist }: { artist: Artist }) {
   const [open, setOpen] = useState(false);
-  const { submit } = useRowAction();
+  const { send, sendingId } = useDecisionEmailControls();
   if (!["rejected", "waitlisted", "withdrawn"].includes(artist.status)) return null;
+  if (artist.decisionEmailSentAt) {
+    return (
+      <Pill className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+        Email sent
+      </Pill>
+    );
+  }
   const label =
     artist.status === "rejected"
       ? "rejection"
@@ -701,9 +725,10 @@ function DecisionEmailButton({ artist }: { artist: Artist }) {
         size="sm"
         variant="outline"
         aria-label={`Send ${label} email to ${artist.name}`}
+        disabled={sendingId !== null}
         onClick={() => setOpen(true)}
       >
-        <Mail className="size-3.5" /> Email
+        <Mail className="size-3.5" /> Send Email
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
@@ -720,9 +745,10 @@ function DecisionEmailButton({ artist }: { artist: Artist }) {
             </Button>
             <Button
               type="button"
+              disabled={sendingId !== null}
               onClick={() => {
-                submit({ intent: "send_decision_email", id: artist.id, status: artist.status });
                 setOpen(false);
+                void send(artist);
               }}
             >
               Send email
@@ -1137,7 +1163,76 @@ function makeColumns(stalls: StallsByEvent): ColumnDef<Artist>[] {
   ];
 }
 
-export default function Inquiry({ loaderData }: Route.ComponentProps) {
+function DecisionEmailProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+  const sendingEmail = useRef(false);
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
+
+  const sendDecisionEmailFromPage = useCallback(
+    async (artist: Artist) => {
+      if (sendingEmail.current) return;
+      sendingEmail.current = true;
+      setSendingEmailId(artist.id);
+      const form = new FormData();
+      form.set("intent", "send_decision_email");
+      form.set("status", artist.status);
+      try {
+        const response = await fetch(`/api/inquiries/${encodeURIComponent(artist.id)}`, {
+          method: "POST",
+          body: form,
+          cache: "no-store",
+        });
+        const result = (await response.json()) as DecisionEmailResult;
+        if (!result.ok) {
+          toast.error(result.message);
+          queryClient.invalidateQueries({ queryKey: ["inquiries"] });
+          return;
+        }
+
+        // The provider outlives the row dialog and applies the result directly.
+        await queryClient.cancelQueries({ queryKey: ["inquiries"] });
+        await queryClient.cancelQueries({ queryKey: ["inquiry", result.id] });
+        applySentDecisionToCache<Artist>(queryClient, result);
+        toast.success(result.message);
+        queryClient.invalidateQueries({ queryKey: ["summary"] });
+      } catch (err) {
+        console.error("Decision email request failed", { id: artist.id, err });
+        toast.error("Could not confirm the email result. Refresh the row before trying again.");
+        queryClient.invalidateQueries({ queryKey: ["inquiries"] });
+      } finally {
+        sendingEmail.current = false;
+        setSendingEmailId(null);
+      }
+    },
+    [queryClient],
+  );
+
+  return (
+    <DecisionEmailContext.Provider
+      value={{ send: sendDecisionEmailFromPage, sendingId: sendingEmailId }}
+    >
+      {children}
+      {sendingEmailId && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-background/50 backdrop-blur-[1px]">
+          <div className="flex items-center gap-3 rounded-xl border bg-background px-5 py-4 shadow-xl">
+            <Loader2 className="size-5 animate-spin text-primary" />
+            <span className="text-sm font-medium">Sending email…</span>
+          </div>
+        </div>
+      )}
+    </DecisionEmailContext.Provider>
+  );
+}
+
+export default function Inquiry(props: Route.ComponentProps) {
+  return (
+    <DecisionEmailProvider>
+      <InquiryContent {...props} />
+    </DecisionEmailProvider>
+  );
+}
+
+function InquiryContent({ loaderData }: Route.ComponentProps) {
   const { events, stalls } = loaderData;
   const [searchParams, setSearchParams] = useSearchParams();
   const [initialSearchQuery] = useState(() => parseListQuery(searchParams));
@@ -1461,8 +1556,8 @@ export default function Inquiry({ loaderData }: Route.ComponentProps) {
             </Button>
           </>
         }
-        renderGridItem={(a) => <ArtistCard artist={a} stalls={stalls} />}
-        renderListItem={(a) => <ArtistRow artist={a} />}
+        renderGridItem={(a) => <ArtistCard artist={a} />}
+        renderListItem={(a) => <ArtistRow artist={a} stalls={stalls} />}
         emptyMessage="No submissions match your filters."
       />
 
@@ -1562,64 +1657,94 @@ export default function Inquiry({ loaderData }: Route.ComponentProps) {
   );
 }
 
-function StatusPills({ artist }: { artist: Artist }) {
+function ArtistCard({ artist }: { artist: Artist }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Pill className={applicationToneClass(artist.status)}>
-        {APPLICATION_LABEL[artist.status]}
-      </Pill>
-      <Pill className={paymentToneClass(artist.paymentStatus)}>
-        {PAYMENT_LABEL[artist.paymentStatus]}
-      </Pill>
-      <DecisionEmailButton artist={artist} />
-    </div>
-  );
-}
-
-function ArtistCard({ artist, stalls }: { artist: Artist; stalls: StallsByEvent }) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-base">
-              <RowName artist={artist} className="text-base font-semibold" />
+    <Card className="h-full min-h-44 gap-0 rounded-lg py-0 shadow-none transition-colors hover:bg-muted/20">
+      <CardHeader className="p-4 pb-0">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <CardTitle
+              className="truncate text-sm font-semibold"
+              title={artist.brandName ?? artist.name}
+            >
+              {artist.brandName ?? artist.name}
             </CardTitle>
-            <p className="text-xs text-muted-foreground">{artist.id}</p>
+            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+              <RowName
+                artist={artist}
+                className="h-auto min-w-0 truncate text-xs font-normal text-muted-foreground"
+              />
+              <span aria-hidden="true">·</span>
+              <RowName
+                artist={artist}
+                label={artist.id}
+                className="h-auto truncate text-xs font-normal text-muted-foreground"
+              />
+            </div>
           </div>
-          <StatusPills artist={artist} />
+          <Pill className={cn("shrink-0", applicationToneClass(artist.status))}>
+            {APPLICATION_LABEL[artist.status]}
+          </Pill>
         </div>
       </CardHeader>
-      <CardContent className="flex items-end justify-between gap-3">
-        <div className="text-sm text-muted-foreground">
-          <p>{artist.brandName ?? "—"}</p>
-          <p>{artist.primaryCategory ?? "—"}</p>
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <StallCell artist={artist} stalls={stalls} />
-          <RowActions artist={artist} />
-        </div>
+      <CardContent className="space-y-3 p-4 pt-3 text-xs text-muted-foreground">
+        <p className="truncate" title={artist.primaryCategory ?? undefined}>
+          {artist.primaryCategory ?? "—"}
+        </p>
+        <p className="line-clamp-3 leading-relaxed" title={artist.productDescription ?? undefined}>
+          {artist.productDescription ?? "No product description provided."}
+        </p>
       </CardContent>
     </Card>
   );
 }
 
-function ArtistRow({ artist }: { artist: Artist }) {
+function ArtistRow({ artist, stalls }: { artist: Artist; stalls: StallsByEvent }) {
+  const assignedStall = stalls[artist.eventId ?? ""]?.find(
+    (stall) => stall.id === artist.stallOptionId,
+  );
   return (
-    <div className="flex items-center justify-between gap-3 p-3">
+    <div className="grid gap-2 px-3 py-3 text-sm transition-colors hover:bg-muted/30 sm:grid-cols-[minmax(180px,230px)_minmax(0,1fr)_auto] sm:items-center lg:grid-cols-[minmax(200px,230px)_minmax(0,1fr)_auto_minmax(60px,100px)_auto]">
       <div className="min-w-0">
-        <div className="flex min-w-0 items-baseline gap-1">
-          <RowName artist={artist} className="min-w-0 truncate font-medium" />
-          <span className="shrink-0 font-normal text-muted-foreground">· {artist.id}</span>
-        </div>
-        <p className="truncate text-sm text-muted-foreground">
-          {artist.brandName ?? artist.primaryCategory ?? "—"} · {artist.email}
+        <p className="truncate font-medium" title={artist.brandName ?? artist.name}>
+          {artist.brandName ?? artist.name}
         </p>
+        <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+          <RowName
+            artist={artist}
+            className="h-auto min-w-0 truncate text-xs font-normal text-muted-foreground"
+          />
+          <span aria-hidden="true">·</span>
+          <RowName
+            artist={artist}
+            label={artist.id}
+            className="h-auto shrink-0 text-xs font-normal text-muted-foreground"
+          />
+        </div>
       </div>
-      <div className="flex items-center gap-3">
-        <StatusPills artist={artist} />
-        <RowActions artist={artist} />
+      <p
+        className="min-w-0 line-clamp-2 text-sm text-muted-foreground"
+        title={artist.productDescription ?? undefined}
+      >
+        {artist.productDescription ?? "No product description provided."}
+      </p>
+      <div className="justify-self-start sm:justify-self-end">
+        <Pill className={applicationToneClass(artist.status)}>
+          {APPLICATION_LABEL[artist.status]}
+        </Pill>
       </div>
+      <span
+        className="hidden truncate text-center text-sm text-muted-foreground lg:block"
+        title={assignedStall?.tier}
+      >
+        {assignedStall?.tier ?? "—"}
+      </span>
+      <time
+        className="hidden whitespace-nowrap text-right text-xs text-muted-foreground lg:block"
+        dateTime={artist.submittedAt}
+      >
+        {formatSubmittedAt(artist.submittedAt)}
+      </time>
     </div>
   );
 }
@@ -1680,8 +1805,10 @@ function RowName({
       <Button
         variant="link"
         onClick={() => setViewOpen(true)}
-        className={cn("h-auto max-w-full justify-start p-0 text-left", className)}
-        aria-label={`View profile for ${artist.name}`}
+        className={cn("h-auto max-w-full min-w-0 shrink justify-start p-0 text-left", className)}
+        aria-label={
+          label ? `View profile for reference ${label}` : `View profile for ${artist.name}`
+        }
       >
         {label ?? artist.name}
       </Button>
@@ -1733,10 +1860,16 @@ function ViewProfileDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="mt-4">
+        <div className="mt-4 flex items-center gap-2">
           <Pill className={applicationToneClass(data?.status ?? artist.status)}>
             {APPLICATION_LABEL[data?.status ?? artist.status]}
           </Pill>
+          {(data?.decisionEmailSentAt ?? artist.decisionEmailSentAt) &&
+            ["rejected", "waitlisted", "withdrawn"].includes(data?.status ?? artist.status) && (
+              <Pill className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                Email sent
+              </Pill>
+            )}
         </div>
 
         {isPending ? (
@@ -1792,7 +1925,8 @@ function ViewProfileDialog({
             {(data.additionalNotes ||
               internalNotes ||
               data.rejectReason ||
-              data.waitlistReason) && (
+              data.waitlistReason ||
+              data.withdrawnReason) && (
               <ProfileSection title="Notes & decision">
                 <dl className="grid gap-2 text-sm">
                   {data.additionalNotes && (
@@ -1804,6 +1938,9 @@ function ViewProfileDialog({
                   )}
                   {data.waitlistReason && (
                     <Detail label="Waitlist reason" value={data.waitlistReason} />
+                  )}
+                  {data.withdrawnReason && (
+                    <Detail label="Withdrawal reason" value={data.withdrawnReason} />
                   )}
                 </dl>
               </ProfileSection>

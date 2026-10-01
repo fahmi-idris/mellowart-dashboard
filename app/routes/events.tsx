@@ -1,17 +1,11 @@
 import { env } from "cloudflare:workers";
 import { useEffect, useState, type ReactNode } from "react";
-import {
-  ArrowRight,
-  CalendarDays,
-  Pencil,
-  Plus,
-  Settings2,
-  Trash2,
-} from "lucide-react";
+import { ArrowRight, CalendarDays, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
 import { Link, useFetcher } from "react-router";
 import { toast } from "sonner";
 
 import type { Route } from "./+types/events";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -33,7 +27,7 @@ import {
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { requireAdmin } from "~/lib/auth.server";
-import type { EventWithCounts } from "~/lib/events";
+import { getEventPhase, type EventWithCounts } from "~/lib/events";
 import {
   createEvent,
   deleteEvent,
@@ -119,6 +113,28 @@ function dateRange(startsAt: string | null, endsAt: string | null): string {
   return `${startsAt} – ${endsAt}`;
 }
 
+const EVENT_PHASE_UI = {
+  upcoming: {
+    label: "Upcoming",
+    className:
+      "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300",
+  },
+  ongoing: {
+    label: "Ongoing",
+    className:
+      "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
+  },
+  inactive: {
+    label: "Inactive",
+    className: "border-muted bg-muted text-muted-foreground",
+  },
+  unscheduled: {
+    label: "Dates TBC",
+    className:
+      "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
+  },
+} as const;
+
 export default function Events({ loaderData }: Route.ComponentProps) {
   const { events } = loaderData;
 
@@ -128,8 +144,8 @@ export default function Events({ loaderData }: Route.ComponentProps) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Events</h1>
           <p className="text-sm text-muted-foreground">
-            Each event scopes its own applicants and stall options. The Webflow
-            Item ID lets the public form link submissions to an event.
+            Each event scopes its own applicants and stall options. The Webflow Item ID lets the
+            public form link submissions to an event.
           </p>
         </div>
         <EventDialog
@@ -153,65 +169,70 @@ export default function Events({ loaderData }: Route.ComponentProps) {
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {events.map((e) => (
-            <Card key={e.id} className="flex flex-col">
-              <CardHeader>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <CardTitle className="text-base">{e.name}</CardTitle>
-                    <CardDescription className="flex items-center gap-1.5">
-                      <CalendarDays className="size-3.5" />
-                      {dateRange(e.startsAt, e.endsAt)}
-                      {e.location ? ` · ${e.location}` : ""}
-                    </CardDescription>
+          {events.map((e) => {
+            const phase = getEventPhase(e);
+            const phaseUi = EVENT_PHASE_UI[phase];
+            return (
+              <Card key={e.id} className="flex flex-col">
+                <CardHeader>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <CardTitle className="text-base">{e.name}</CardTitle>
+                        <Badge variant="outline" className={phaseUi.className}>
+                          {phaseUi.label}
+                        </Badge>
+                      </div>
+                      <CardDescription className="flex items-center gap-1.5">
+                        <CalendarDays className="size-3.5" />
+                        {dateRange(e.startsAt, e.endsAt)}
+                        {e.location ? ` · ${e.location}` : ""}
+                      </CardDescription>
+                    </div>
+                    <div className="flex shrink-0 items-center">
+                      <EventDialog
+                        event={e}
+                        trigger={
+                          <Button variant="ghost" size="icon" className="size-8">
+                            <Pencil className="size-4" />
+                            <span className="sr-only">Edit event</span>
+                          </Button>
+                        }
+                      />
+                      <DeleteEventButton event={e} />
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center">
-                    <EventDialog
-                      event={e}
-                      trigger={
-                        <Button variant="ghost" size="icon" className="size-8">
-                          <Pencil className="size-4" />
-                          <span className="sr-only">Edit event</span>
-                        </Button>
-                      }
-                    />
-                    <DeleteEventButton event={e} />
+                </CardHeader>
+                <CardContent className="flex-1">
+                  <div className="flex items-baseline gap-4">
+                    <div>
+                      <p className="text-2xl font-semibold tabular-nums">{e.applicants}</p>
+                      <p className="text-xs text-muted-foreground">Applicants</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+                        {e.awaitingReview}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Awaiting Review</p>
+                    </div>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1">
-                <div className="flex items-baseline gap-4">
-                  <div>
-                    <p className="text-2xl font-semibold tabular-nums">
-                      {e.applicants}
-                    </p>
-                    <p className="text-xs text-muted-foreground">applicants</p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">
-                      {e.awaitingReview}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      awaiting review
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-              <CardFooter className="gap-2">
-                <Button asChild size="sm" className="flex-1">
-                  <Link to={`/inquiry?event=${e.id}`}>
-                    View applicants
-                    <ArrowRight className="size-4" />
-                  </Link>
-                </Button>
-                <Button asChild size="sm" variant="outline">
-                  <Link to={`/events/${e.id}`} aria-label="Stall options">
-                    <Settings2 className="size-4" />
-                  </Link>
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
+                </CardContent>
+                <CardFooter className="gap-2">
+                  <Button asChild size="sm" className="flex-1">
+                    <Link to={`/inquiry?event=${e.id}`}>
+                      View applicants
+                      <ArrowRight className="size-4" />
+                    </Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline">
+                    <Link to={`/events/${e.id}`} aria-label="Stall options">
+                      <Settings2 className="size-4" />
+                    </Link>
+                  </Button>
+                </CardFooter>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>
@@ -234,13 +255,7 @@ function useEventFetcher(onSuccess: () => void) {
   return fetcher;
 }
 
-function EventDialog({
-  event,
-  trigger,
-}: {
-  event?: EventWithCounts;
-  trigger: ReactNode;
-}) {
+function EventDialog({ event, trigger }: { event?: EventWithCounts; trigger: ReactNode }) {
   const [open, setOpen] = useState(false);
   const fetcher = useEventFetcher(() => setOpen(false));
   const busy = fetcher.state !== "idle";
@@ -253,16 +268,12 @@ function EventDialog({
         <DialogHeader>
           <DialogTitle>{editing ? "Edit event" : "Add event"}</DialogTitle>
           <DialogDescription>
-            Name and slug are required. The Webflow Item ID is optional — it's
-            the reference the public submit form can pass as <code>event</code>.
+            Name and slug are required. The Webflow Item ID is optional — it's the reference the
+            public submit form can pass as <code>event</code>.
           </DialogDescription>
         </DialogHeader>
         <fetcher.Form method="post" className="grid gap-4">
-          <input
-            type="hidden"
-            name="intent"
-            value={editing ? "update" : "create"}
-          />
+          <input type="hidden" name="intent" value={editing ? "update" : "create"} />
           {editing && <input type="hidden" name="eventId" value={event.id} />}
 
           <div className="grid gap-2">
@@ -321,22 +332,12 @@ function EventDialog({
             </div>
             <div className="grid gap-2">
               <Label htmlFor="endsAt">End date</Label>
-              <Input
-                id="endsAt"
-                name="endsAt"
-                type="date"
-                defaultValue={event?.endsAt ?? ""}
-              />
+              <Input id="endsAt" name="endsAt" type="date" defaultValue={event?.endsAt ?? ""} />
             </div>
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={busy}
-            >
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>
               Cancel
             </Button>
             <Button type="submit" disabled={busy}>
@@ -366,23 +367,16 @@ function DeleteEventButton({ event }: { event: EventWithCounts }) {
         <DialogHeader>
           <DialogTitle>Delete event</DialogTitle>
           <DialogDescription>
-            Delete{" "}
-            <span className="font-medium text-foreground">{event.name}</span>?
-            Its stall options are removed. The {event.applicants} application
-            {event.applicants === 1 ? "" : "s"} are kept but un-scoped from this
-            event.
+            Delete <span className="font-medium text-foreground">{event.name}</span>? Its stall
+            options are removed. The {event.applicants} application
+            {event.applicants === 1 ? "" : "s"} are kept but un-scoped from this event.
           </DialogDescription>
         </DialogHeader>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="delete" />
           <input type="hidden" name="eventId" value={event.id} />
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={busy}
-            >
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>
               Cancel
             </Button>
             <Button type="submit" variant="destructive" disabled={busy}>

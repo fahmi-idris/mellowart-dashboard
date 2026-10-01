@@ -282,8 +282,12 @@ export async function sendWaitlistEmail(
   }
 }
 
-/** Manually send the withdrawal notice after the status has been saved. */
-export async function sendWithdrawnEmail(env: Env, submissionId: string): Promise<boolean> {
+/** Manually send the withdrawal notice after the status and optional reason are saved. */
+export async function sendWithdrawnEmail(
+  env: Env,
+  submissionId: string,
+  reason: string | null,
+): Promise<boolean> {
   const row = await env.DB.prepare(
     `SELECT s.id, s.event_id, s.first_name, s.last_name, s.email,
             e.name AS event_name
@@ -313,6 +317,7 @@ export async function sendWithdrawnEmail(env: Env, submissionId: string): Promis
           email: row.email,
           reference: row.id,
           eventName: row.event_name ?? "",
+          reason: reason ?? "",
         },
         row.event_id,
       ),

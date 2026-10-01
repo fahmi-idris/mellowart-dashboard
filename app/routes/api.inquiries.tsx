@@ -47,6 +47,8 @@ const EXPORT_COLUMNS: {
   { header: "Status", get: (r) => r.status },
   { header: "Reject reason", get: (r) => r.rejectReason },
   { header: "Waitlist reason", get: (r) => r.waitlistReason },
+  { header: "Withdrawal reason", get: (r) => r.withdrawnReason },
+  { header: "Decision email sent at", get: (r) => r.decisionEmailSentAt },
   { header: "Decided by", get: (r) => r.decidedBy },
   { header: "Decided at", get: (r) => r.decidedAt },
   { header: "Stall assigned", get: (r) => r.stallTier },
@@ -92,9 +94,11 @@ const LIST_CONFIG: D1ListConfig = {
     "id, first_name AS firstName, last_name AS lastName, " +
     "(first_name || ' ' || last_name) AS name, email, brand_name AS brandName, " +
     "primary_category AS primaryCategory, secondary_category AS secondaryCategory, " +
+    "product_description AS productDescription, " +
     "sharing_stall AS sharingStall, has_insurance AS hasInsurance, " +
     "applied_before AS appliedBefore, instagram, decided_at AS decidedAt, " +
     "event_id AS eventId, status, reject_reason AS rejectReason, " +
+    "withdrawn_reason AS withdrawnReason, decision_email_sent_at AS decisionEmailSentAt, " +
     "stall_option_id AS stallOptionId, payment_status AS paymentStatus, " +
     "invoice_url AS invoiceUrl, internal_notes AS internalNotes, " +
     "archived_at AS archivedAt, created_at AS submittedAt",

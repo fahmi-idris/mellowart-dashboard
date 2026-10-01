@@ -66,8 +66,8 @@ export function StallOptionsManager({
         <Card>
           <CardContent className="py-4">
             <p className="text-sm text-muted-foreground">
-              No stall options yet. Add at least one so accepted applicants can
-              be assigned a stall and invoiced.
+              No stall options yet. Add at least one so accepted applicants can be assigned a stall
+              and invoiced.
             </p>
           </CardContent>
         </Card>
@@ -79,6 +79,10 @@ export function StallOptionsManager({
 }
 
 function StallRow({ eventId, stall }: { eventId: string; stall: StallOption }) {
+  const price = new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: stall.currency,
+  }).format(stall.unitAmount);
   return (
     <Card>
       <CardContent className="flex items-center justify-between gap-4 py-4">
@@ -86,14 +90,13 @@ function StallRow({ eventId, stall }: { eventId: string; stall: StallOption }) {
           <p className="font-medium">
             {stall.tier}{" "}
             <span className="font-normal text-muted-foreground">
-              · ${stall.unitAmount} {stall.currency}
+              · {price} {stall.currency}
               {stall.slug ? ` · ${stall.slug}` : ""}
             </span>
           </p>
           <p className="truncate text-sm text-muted-foreground">
-            {[stall.frontage, stall.furniture, stall.sharing]
-              .filter(Boolean)
-              .join(" · ") || "No details"}
+            {[stall.frontage, stall.furniture, stall.sharing].filter(Boolean).join(" · ") ||
+              "No details"}
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -127,26 +130,29 @@ function StallDialog({
   const fetcher = useStallFetcher(() => setOpen(false));
   const busy = fetcher.state !== "idle";
   const editing = stall != null;
+  const [currency, setCurrency] = useState(stall?.currency ?? "AUD");
+  const [amount, setAmount] = useState(stall?.unitAmount.toFixed(2) ?? "");
+  const [amountFocused, setAmountFocused] = useState(false);
+  const formattedAmount =
+    amount && Number.isFinite(Number(amount))
+      ? new Intl.NumberFormat("en-AU", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(Number(amount))
+      : amount;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {editing ? "Edit stall option" : "Add stall option"}
-          </DialogTitle>
+          <DialogTitle>{editing ? "Edit stall option" : "Add stall option"}</DialogTitle>
           <DialogDescription>
-            Event-scoped. The price is GST-inclusive and drives the Xero invoice
-            amount.
+            Event-scoped. The price is GST-inclusive and drives the Xero invoice amount.
           </DialogDescription>
         </DialogHeader>
         <fetcher.Form method="post" className="grid gap-4">
-          <input
-            type="hidden"
-            name="intent"
-            value={editing ? "update" : "create"}
-          />
+          <input type="hidden" name="intent" value={editing ? "update" : "create"} />
           <input type="hidden" name="eventId" value={eventId} />
           {editing && <input type="hidden" name="stallId" value={stall.id} />}
 
@@ -176,15 +182,37 @@ function StallDialog({
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="grid gap-2">
               <Label htmlFor="unitAmount">Price</Label>
-              <Input
-                id="unitAmount"
-                name="unitAmount"
-                type="number"
-                min={0}
-                step="0.01"
-                defaultValue={stall?.unitAmount}
-                required
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
+                  {currency === "AUD" ? "$" : currency}
+                </span>
+                <Input
+                  id="unitAmount"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={amountFocused ? amount : formattedAmount}
+                  onFocus={() => setAmountFocused(true)}
+                  onBlur={() => {
+                    setAmountFocused(false);
+                    if (amount && Number.isFinite(Number(amount))) {
+                      setAmount(Number(amount).toFixed(2));
+                    }
+                  }}
+                  onChange={(event) => {
+                    const next = event.target.value.replaceAll(",", "").replaceAll(" ", "");
+                    if (/^\d*(?:\.\d{0,2})?$/.test(next)) setAmount(next);
+                  }}
+                  placeholder="0.00"
+                  className="pl-12 text-right tabular-nums"
+                  aria-describedby="unitAmountHint"
+                  required
+                />
+                <input type="hidden" name="unitAmount" value={amount} />
+              </div>
+              <p id="unitAmountHint" className="text-xs text-muted-foreground">
+                GST-inclusive amount
+              </p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="currency">Currency</Label>
@@ -192,7 +220,8 @@ function StallDialog({
                 id="currency"
                 name="currency"
                 maxLength={3}
-                defaultValue={stall?.currency ?? "AUD"}
+                value={currency}
+                onChange={(event) => setCurrency(event.target.value.toUpperCase())}
                 className="uppercase"
                 required
               />
@@ -238,12 +267,7 @@ function StallDialog({
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={busy}
-            >
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>
               Cancel
             </Button>
             <Button type="submit" disabled={busy}>
@@ -273,21 +297,15 @@ function DeleteStallButton({ stall }: { stall: StallOption }) {
         <DialogHeader>
           <DialogTitle>Delete stall option</DialogTitle>
           <DialogDescription>
-            Delete{" "}
-            <span className="font-medium text-foreground">{stall.tier}</span>?
-            Applicants currently assigned this stall will have it cleared.
+            Delete <span className="font-medium text-foreground">{stall.tier}</span>? Applicants
+            currently assigned this stall will have it cleared.
           </DialogDescription>
         </DialogHeader>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="delete" />
           <input type="hidden" name="stallId" value={stall.id} />
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={busy}
-            >
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>
               Cancel
             </Button>
             <Button type="submit" variant="destructive" disabled={busy}>

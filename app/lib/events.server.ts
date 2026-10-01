@@ -142,15 +142,16 @@ export interface StallOptionInput {
 /** Validate a stall-option form submission. Shared by the stall CRUD routes. */
 export function parseStallOptionForm(form: FormData): StallOptionInput | { error: string } {
   const tier = String(form.get("tier") ?? "").trim();
-  const unitAmount = Number(form.get("unitAmount"));
+  const amountText = String(form.get("unitAmount") ?? "").trim();
+  const unitAmount = Number(amountText);
   const currency = String(form.get("currency") ?? "")
     .trim()
     .toUpperCase();
   if (!tier) return { error: "Tier name is required." };
-  if (!Number.isFinite(unitAmount) || unitAmount < 0) {
-    return { error: "Price must be a positive number." };
+  if (!/^\d+(?:\.\d{1,2})?$/.test(amountText) || !Number.isFinite(unitAmount)) {
+    return { error: "Price must be an amount with up to two decimal places." };
   }
-  if (currency.length !== 3) {
+  if (!/^[A-Z]{3}$/.test(currency)) {
     return { error: "Currency must be a 3-letter code." };
   }
   const slug = String(form.get("slug") ?? "")
