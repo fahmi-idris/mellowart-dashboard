@@ -4,8 +4,38 @@ import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
-import type { EventSummary } from "~/lib/events";
+import { getEventPhase, type EventPhase, type EventSummary } from "~/lib/events";
 import { cn } from "~/lib/utils";
+
+const PHASE_LABELS: Record<EventPhase, { label: string; className: string }> = {
+  ongoing: {
+    label: "Active",
+    className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+  },
+  upcoming: {
+    label: "Upcoming",
+    className: "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300",
+  },
+  inactive: {
+    label: "Inactive",
+    className: "bg-muted text-muted-foreground",
+  },
+  unscheduled: {
+    label: "Dates TBC",
+    className: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+  },
+};
+
+function EventPhasePill({ event }: { event: EventSummary }) {
+  const phase = PHASE_LABELS[getEventPhase(event)];
+  return (
+    <span
+      className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", phase.className)}
+    >
+      {phase.label}
+    </span>
+  );
+}
 
 /** Searchable, keyboard-operable event picker using the app's shadcn primitives. */
 export function EventCombobox({
@@ -13,12 +43,16 @@ export function EventCombobox({
   value,
   onValueChange,
   disabled = false,
+  showPhase = false,
+  ariaLabel = "Email template event",
   className,
 }: {
   events: EventSummary[];
   value?: string;
   onValueChange: (id: string) => void;
   disabled?: boolean;
+  showPhase?: boolean;
+  ariaLabel?: string;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -54,11 +88,12 @@ export function EventCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          aria-label="Email template event"
+          aria-label={ariaLabel}
           disabled={disabled || events.length === 0}
           className={cn("min-w-0 justify-between gap-2 font-normal", className)}
         >
           <span className="truncate">{selected?.name ?? "No event found"}</span>
+          {showPhase && selected && <EventPhasePill event={selected} />}
           <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
@@ -121,7 +156,8 @@ export function EventCombobox({
                   )}
                   aria-hidden="true"
                 />
-                <span className="truncate">{event.name}</span>
+                <span className="min-w-0 flex-1 truncate">{event.name}</span>
+                {showPhase && <EventPhasePill event={event} />}
               </button>
             ))
           )}

@@ -6,15 +6,9 @@ import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react";
 
 import type { Route } from "./+types/dashboard";
 import { Button } from "~/components/ui/button";
+import { EventCombobox } from "~/components/event-combobox";
 import { Donut, Sparkline, TrendChart } from "~/components/charts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
 import { requireAdmin } from "~/lib/auth.server";
 import { listEventsWithCounts } from "~/lib/events.server";
@@ -149,18 +143,13 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           </p>
         </div>
         {events.length > 0 && (
-          <Select value={eventId} onValueChange={setEventId}>
-            <SelectTrigger className="w-full sm:w-64" aria-label="Filter dashboard by event">
-              <SelectValue placeholder="Select event" />
-            </SelectTrigger>
-            <SelectContent>
-              {events.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <EventCombobox
+            events={events}
+            value={eventId}
+            onValueChange={setEventId}
+            ariaLabel="Filter dashboard by event"
+            className="w-full sm:w-64"
+          />
         )}
       </div>
 

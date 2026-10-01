@@ -365,6 +365,7 @@ export default function EmailTemplates({ loaderData }: Route.ComponentProps) {
             events={events}
             value={event?.id}
             disabled={events.length === 0}
+            showPhase
             onValueChange={(eventId) => setSearchParams({ event: eventId })}
             className="w-72 max-w-full bg-background"
           />
@@ -1011,6 +1012,7 @@ function TemplateEditor({
         <EventCombobox
           events={events}
           value={event.id}
+          showPhase
           onValueChange={(id) => {
             const selected = events.find((option) => option.id === id);
             if (selected) onSelectEvent(selected.slug);
