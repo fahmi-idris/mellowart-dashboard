@@ -26,6 +26,7 @@ import {
 } from "~/components/ui/dialog";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
 import { requireAdmin } from "~/lib/auth.server";
 import { getEventPhase, type EventWithCounts } from "~/lib/events";
 import {
@@ -173,13 +174,24 @@ export default function Events({ loaderData }: Route.ComponentProps) {
             const phase = getEventPhase(e);
             const phaseUi = EVENT_PHASE_UI[phase];
             return (
-              <Card key={e.id} className="flex flex-col">
-                <CardHeader>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="mb-1 flex flex-wrap items-center gap-2">
-                        <CardTitle className="text-base">{e.name}</CardTitle>
-                        <Badge variant="outline" className={phaseUi.className}>
+              <Card key={e.id} className="flex min-w-0 flex-col">
+                <CardHeader className="min-w-0">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex items-center gap-2">
+                        <CardTitle className="min-w-0 flex-1 text-base">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button type="button" className="block w-full truncate text-left">
+                                {e.name}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent className="break-words" side="top">
+                              {e.name}
+                            </TooltipContent>
+                          </Tooltip>
+                        </CardTitle>
+                        <Badge variant="outline" className={`shrink-0 ${phaseUi.className}`}>
                           {phaseUi.label}
                         </Badge>
                       </div>
