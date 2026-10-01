@@ -154,17 +154,37 @@ Additional references:
 
 ## Production deployment
 
+For the isolated `mellowart-dev` Worker and a copy of the production data, use
+`bun run deploy:dev`. See [Development deployment](docs/dev-deployment.md) for
+the separate database/storage bindings and migration commands.
+
 Production deployment requires access to the configured Cloudflare account.
-Apply remote D1 migrations separately before deploying the Worker:
+After pushing your code, run the production release script:
 
 ```bash
-bunx wrangler d1 migrations apply mellow-db --remote
-bun run deploy
+bun run deploy:production
 ```
 
-`bun run deploy` does not apply database migrations automatically. Review the
-pending remote migrations and take a backup before applying production schema
-changes.
+The script checks types, runs tests, builds and validates the production target,
+exports a database backup, applies pending migrations, checks foreign-key
+integrity, and deploys the Worker. Any failed step stops the release.
+`bun run deploy` is an alias for the same production release.
+
+Backups are kept in dated, private folders under `.wrangler/releases/` and are
+ignored by Git. In CI, preserve that folder as a private artifact before the
+runner is removed. Already-applied migrations are skipped; keep migration files
+in Git and add new files for future schema changes.
+
+To validate the release locally without changing production:
+
+```bash
+bun run deploy:production:check
+```
+
+`db:migrations:production` lists pending migrations, and `db:migrate:production`
+applies them independently when needed. The full release script handles both
+steps automatically. Git push alone does not run this script; a production CI
+pipeline can use `bun run deploy:production` as its deployment command.
 
 ## Security warning
 

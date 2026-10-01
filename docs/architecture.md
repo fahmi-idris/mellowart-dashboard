@@ -235,7 +235,8 @@ Migrations are ordered SQL files under `migrations/`. Never modify a migration
 that may already have run in production. Add a new numbered migration, verify it
 against local D1, and apply it remotely as a separate deployment step.
 
-Remote migration execution is not part of `bun run deploy`.
+The production release script backs up D1 and applies pending migrations before
+deploying the Worker. Run it with `bun run deploy:production` (or `bun run deploy`).
 
 ## 6. Authentication and authorization
 
@@ -351,12 +352,14 @@ Recommended sequence:
 Commands used by this repository:
 
 ```bash
-bun run test
-bun run typecheck
-bun run build
-bunx wrangler d1 migrations apply mellow-db --remote
-bun run deploy
+bun run deploy:production
 ```
+
+This command runs the local checks and build, verifies the production bindings,
+exports a private backup under `.wrangler/releases/`, applies pending migrations,
+checks foreign-key integrity, and deploys. A failure stops subsequent steps.
+Use `bun run deploy:production:check` to run only the local checks and deployment
+validation. A CI pipeline should retain the backup folder as a private artifact.
 
 Do not run remote migration or deployment commands merely to start local
 development.
@@ -372,7 +375,8 @@ development.
   orphaned R2 objects.
 - Xero payment state is not automatically synchronized by a registered webhook
   route.
-- Remote migrations and Worker deployment are separate manual operations.
+- Production releases require running the release script; Git push alone does
+  not trigger it.
 - There is no infrastructure-as-code definition or CI/CD workflow.
 - Runtime/package-manager versions are not pinned for the team.
 
