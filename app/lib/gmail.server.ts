@@ -147,6 +147,18 @@ export interface OutgoingEmail {
 /** Send one HTML email as the connected mailbox. Throws on API failure. */
 export async function sendEmail(env: Env, msg: OutgoingEmail): Promise<void> {
   const { token, email } = await getValidAccessToken(env);
+  await sendFromMailbox(token, email, msg);
+}
+
+/** Send a template test to the same mailbox used to authenticate the sender. */
+export async function sendTestEmail(env: Env, msg: Omit<OutgoingEmail, "to">): Promise<string> {
+  const { token, email } = await getValidAccessToken(env);
+  if (!email.trim()) throw new Error("Reconnect Gmail to identify the connected mailbox.");
+  await sendFromMailbox(token, email, { ...msg, to: email });
+  return email;
+}
+
+async function sendFromMailbox(token: string, email: string, msg: OutgoingEmail): Promise<void> {
   const from = msg.fromName ? `${encodeHeader(msg.fromName)} <${email}>` : email;
 
   const mime = [

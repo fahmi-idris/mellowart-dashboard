@@ -64,7 +64,7 @@ import {
 import { Textarea } from "~/components/ui/textarea";
 import { requireAdmin } from "~/lib/auth.server";
 import { uploadEmailAsset } from "~/lib/email-assets.server";
-import { sendEmail } from "~/lib/gmail.server";
+import { sendTestEmail } from "~/lib/gmail.server";
 import {
   BLOCK_LABELS,
   type BlockType,
@@ -311,13 +311,12 @@ export async function action({ request }: Route.ActionArgs) {
         ? (JSON.parse(String(brandingJson)) as EmailBranding)
         : await getBranding(env.DB, eventId);
       const rendered = renderContent(content, branding, await previewContext(key, event.name));
-      await sendEmail(env, {
-        to: session.email,
+      const recipient = await sendTestEmail(env, {
         subject: `[TEST] ${rendered.subject}`,
         html: rendered.html,
         fromName: branding.fromName,
       });
-      return { ok: true, message: `Test sent to ${session.email}.` };
+      return { ok: true, message: `Test sent to ${recipient}.` };
     }
 
     return { ok: false, message: "Unknown action." };
@@ -1031,7 +1030,7 @@ function TemplateEditor({
             disabled={!gmail.connected || testFetcher.state !== "idle"}
             title={
               gmail.connected
-                ? "Send a sample to your signed-in admin email"
+                ? `Send a sample to the connected Gmail account${gmail.email ? ` (${gmail.email})` : ""}`
                 : gmail.configured
                   ? "Connect Gmail in Invoice settings to send tests"
                   : "Configure Google OAuth credentials and restart the local server"
