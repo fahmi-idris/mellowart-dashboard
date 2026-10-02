@@ -179,7 +179,7 @@ function StallDialog({
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid items-start gap-4 sm:grid-cols-3">
             <div className="grid gap-2">
               <Label htmlFor="unitAmount">Price</Label>
               <div className="relative">

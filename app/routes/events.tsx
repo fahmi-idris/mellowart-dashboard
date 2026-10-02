@@ -1,6 +1,18 @@
 import { env } from "cloudflare:workers";
 import { useEffect, useState } from "react";
-import { ArrowRight, CalendarDays, Pencil, Plus, Settings2, Trash2, RefreshCw } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarDays,
+  Pencil,
+  Plus,
+  Settings2,
+  Trash2,
+  RefreshCw,
+  CheckCircle2,
+  CircleDashed,
+  Clock3,
+  AlertCircle,
+} from "lucide-react";
 import { Link, useFetcher } from "react-router";
 import { toast } from "sonner";
 
@@ -279,22 +291,44 @@ function WebflowSyncStatus({ event }: { event: EventWithCounts }) {
     else toast.warning(fetcher.data.message);
   }, [fetcher.state, fetcher.data]);
   const busy = fetcher.state !== "idle";
+  const status = event.webflowSyncStatus;
+  const statusUi =
+    status === "synced"
+      ? {
+          label: "Published to Webflow",
+          icon: CheckCircle2,
+          className:
+            "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
+        }
+      : status === "failed"
+        ? {
+            label: "Webflow sync failed",
+            icon: AlertCircle,
+            className:
+              "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-300",
+          }
+        : status === "pending"
+          ? {
+              label: "Webflow sync pending",
+              icon: Clock3,
+              className:
+                "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
+            }
+          : {
+              label: "Not published to Webflow",
+              icon: CircleDashed,
+              className: "border-border bg-muted text-muted-foreground",
+            };
+  const StatusIcon = statusUi.icon;
   return (
     <div className="mt-4 space-y-2 border-t pt-3">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Badge
           variant="outline"
-          className={
-            event.webflowSyncStatus === "failed" ? "text-destructive" : "text-muted-foreground"
-          }
+          className={`h-auto min-h-6 whitespace-normal py-1 ${statusUi.className}`}
         >
-          {event.webflowSyncStatus === "synced"
-            ? "Published to Webflow"
-            : event.webflowSyncStatus === "failed"
-              ? "Webflow sync failed"
-              : event.webflowSyncStatus === "pending"
-                ? "Webflow sync pending"
-                : "Not published to Webflow"}
+          <StatusIcon aria-hidden="true" className="shrink-0" />
+          {statusUi.label}
         </Badge>
         {event.webflowSyncStatus !== "synced" && (
           <fetcher.Form method="post">
