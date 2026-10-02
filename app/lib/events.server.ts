@@ -1,6 +1,45 @@
 /** Events + per-event stall options: reads, counts, and stall CRUD. */
 
-import type { EventSummary, EventWithCounts, StallOption } from "~/lib/events";
+import {
+  EVENT_REFERENCE_KINDS,
+  type EventReference,
+  type EventSummary,
+  type EventWithCounts,
+  type StallOption,
+} from "~/lib/events";
+import type { EventFormInput } from "./event-form";
+import sanitizeHtml from "sanitize-html";
+
+export function sanitizeEventDescription(html: string): string {
+  return sanitizeHtml(html, {
+    allowedTags: [
+      "p",
+      "br",
+      "strong",
+      "em",
+      "s",
+      "h2",
+      "h3",
+      "ul",
+      "ol",
+      "li",
+      "blockquote",
+      "a",
+      "hr",
+    ],
+    allowedAttributes: { a: ["href", "target", "rel"] },
+    allowedSchemes: ["https", "http", "mailto"],
+    allowProtocolRelative: false,
+    transformTags: { a: sanitizeHtml.simpleTransform("a", { rel: "noopener noreferrer" }) },
+  });
+}
+
+export async function listEventReferences(db: D1Database): Promise<EventReference[]> {
+  const result = await db
+    .prepare("SELECT id, kind, name FROM event_references ORDER BY kind, name COLLATE NOCASE")
+    .all<EventReference>();
+  return result.results;
+}
 
 const EVENT_COLUMNS =
   "id, webflow_id AS webflowId, name, slug, location, " +
@@ -15,7 +54,9 @@ export async function listEventsWithCounts(db: D1Database): Promise<EventWithCou
   const res = await db
     .prepare(
       `SELECT e.id, e.webflow_id AS webflowId, e.name, e.slug, e.location,
-              e.starts_at AS startsAt, e.ends_at AS endsAt,
+              e.starts_at AS startsAt, e.ends_at AS endsAt, e.summary, e.description, e.image,
+              e.webflow_sync_status AS webflowSyncStatus, e.webflow_sync_error AS webflowSyncError,
+              e.webflow_synced_at AS webflowSyncedAt,
               COUNT(s.id) AS applicants,
               COALESCE(SUM(CASE WHEN s.status = 'pending' THEN 1 ELSE 0 END), 0) AS awaitingReview
          FROM events e
@@ -24,7 +65,21 @@ export async function listEventsWithCounts(db: D1Database): Promise<EventWithCou
         ORDER BY e.starts_at DESC, e.created_at DESC`,
     )
     .all<EventWithCounts>();
-  return res.results ?? [];
+  const events = res.results ?? [];
+  const links = await db
+    .prepare(
+      `SELECT l.event_id AS eventId, r.id, r.kind, r.name
+    FROM event_reference_links l JOIN event_references r ON r.id = l.reference_id
+    ORDER BY r.name COLLATE NOCASE`,
+    )
+    .all<EventReference & { eventId: string }>();
+  const byEvent = new Map<string, EventReference[]>();
+  for (const { eventId, ...reference } of links.results) {
+    const values = byEvent.get(eventId) ?? [];
+    values.push(reference);
+    byEvent.set(eventId, values);
+  }
+  return events.map((event) => ({ ...event, references: byEvent.get(event.id) ?? [] }));
 }
 
 /** Cheap sidebar availability check; uses the same end-date rule as the template picker. */
@@ -49,64 +104,63 @@ export async function getEvent(db: D1Database, id: string): Promise<EventSummary
     .first<EventSummary>();
 }
 
-export interface EventInput {
-  name: string;
-  slug: string;
-  webflowId?: string | null;
-  location?: string | null;
-  startsAt?: string | null;
-  endsAt?: string | null;
-}
-
-export async function createEvent(db: D1Database, input: EventInput): Promise<string> {
-  const id = `EVT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-  await db
-    .prepare(
-      `INSERT INTO events (id, webflow_id, name, slug, location, starts_at, ends_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      id,
-      input.webflowId ?? null,
-      input.name,
-      input.slug,
-      input.location ?? null,
-      input.startsAt ?? null,
-      input.endsAt ?? null,
-    )
-    .run();
-  return id;
-}
-
-export async function updateEvent(db: D1Database, id: string, input: EventInput): Promise<boolean> {
-  const res = await db
-    .prepare(
-      `UPDATE events
-         SET webflow_id = ?, name = ?, slug = ?, location = ?,
-             starts_at = ?, ends_at = ?, updated_at = datetime('now')
-       WHERE id = ?`,
-    )
-    .bind(
-      input.webflowId ?? null,
-      input.name,
-      input.slug,
-      input.location ?? null,
-      input.startsAt ?? null,
-      input.endsAt ?? null,
-      id,
-    )
-    .run();
-  return (res.meta.changes ?? 0) > 0;
-}
-
-/**
- * Delete an event. Its stall options cascade away (FK), and any submissions
- * pointing at it have `event_id` set to NULL (FK) — applications are never
- * deleted by removing an event.
- */
-export async function deleteEvent(db: D1Database, id: string): Promise<boolean> {
-  const res = await db.prepare("DELETE FROM events WHERE id = ?").bind(id).run();
-  return (res.meta.changes ?? 0) > 0;
+/** Atomically save content + reusable reference links. Existing Webflow ids are never cleared. */
+export async function saveEventContent(
+  db: D1Database,
+  id: string | null,
+  input: EventFormInput,
+  newId?: string,
+): Promise<boolean> {
+  const eventId = id ?? newId ?? `EVT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+  const description = input.description ? sanitizeEventDescription(input.description) : null;
+  const location = input.references.location.join(", ") || null;
+  const values = [
+    input.name,
+    input.slug,
+    input.startsAt,
+    input.endsAt,
+    input.summary,
+    description,
+    input.image,
+    location,
+    crypto.randomUUID(),
+  ];
+  const write = id
+    ? db
+        .prepare(
+          `UPDATE events SET name=?, slug=?, starts_at=?, ends_at=?, summary=?, description=?, image=?, location=?, webflow_sync_version=?, webflow_sync_status='pending', webflow_sync_error=NULL, updated_at=datetime('now') WHERE id=?`,
+        )
+        .bind(...values, eventId)
+    : db
+        .prepare(
+          `INSERT INTO events (name, slug, starts_at, ends_at, summary, description, image, location, webflow_sync_version, id, webflow_sync_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        )
+        .bind(...values, eventId);
+  const statements = [
+    write,
+    db.prepare("DELETE FROM event_reference_links WHERE event_id=?").bind(eventId),
+  ];
+  for (const kind of EVENT_REFERENCE_KINDS) {
+    for (const name of input.references[kind]) {
+      statements.push(
+        db
+          .prepare(
+            "INSERT INTO event_references (id, kind, name) VALUES (?, ?, ?) ON CONFLICT(kind, name) DO NOTHING",
+          )
+          .bind(`REF-${crypto.randomUUID()}`, kind, name),
+      );
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO event_reference_links (event_id, reference_id)
+        SELECT ?, id FROM event_references WHERE kind=? AND name=? COLLATE NOCASE`,
+          )
+          .bind(eventId, kind, name),
+      );
+    }
+  }
+  const results = await db.batch(statements);
+  return (results[0].meta.changes ?? 0) > 0;
 }
 
 export async function listStallOptions(db: D1Database, eventId: string): Promise<StallOption[]> {
@@ -258,17 +312,4 @@ export async function findStallByEventSlug(
     .bind(eventId, slug)
     .first<{ id: string }>();
   return row?.id ?? null;
-}
-
-/**
- * Mirror events from the Webflow CMS into the local `events` table.
- *
- * STUB — Phase 2 wiring. The real implementation fetches the Webflow CMS
- * "Events" collection and upserts each item by `webflow_id` (name, slug,
- * location, start/end dates). Events are managed in Webflow; the dashboard only
- * mirrors them, so until this is wired, seed the `events` table directly.
- */
-export async function syncEventsFromWebflow(_env: Env): Promise<{ synced: number }> {
-  // TODO(phase-2): call Webflow CMS API and upsert by webflow_id.
-  return { synced: 0 };
 }

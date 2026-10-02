@@ -33,6 +33,7 @@ export async function uploadEmailAsset(
   bucket: R2Bucket,
   file: File,
   uploadedBy: string,
+  prefix: "email-assets" | "event-assets" = "email-assets",
 ): Promise<{ key: string }> {
   const extension = EXTENSION_BY_TYPE[file.type];
   if (!extension) {
@@ -48,7 +49,7 @@ export async function uploadEmailAsset(
     throw new Error("The file content does not match its image type.");
   }
 
-  const key = `email-assets/${crypto.randomUUID()}.${extension}`;
+  const key = `${prefix}/${crypto.randomUUID()}.${extension}`;
   await bucket.put(key, data, {
     httpMetadata: {
       contentType: file.type,

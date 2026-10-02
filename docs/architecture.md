@@ -171,21 +171,22 @@ Webflow has two distinct concepts in the project documentation:
 
 1. **Artist form integration:** implemented. Browser JavaScript maps Webflow
    fields to `POST /api/submit`.
-2. **Webflow CMS event synchronization:** not implemented. The
-   `syncEventsFromWebflow()` function is a Phase 2 stub and is not called.
+2. **Webflow CMS event publishing:** Create and Save automatically publish after
+   saving D1. The server-side `app/lib/webflow/` mapper/client validates the collection
+   schema, resolves references, preserves CMS item IDs, and records sync status/error.
+   Event cards support retries. D1 remains the source of truth; Webflow is the public
+   projection. The obsolete inbound sync stub has been removed.
 
 Events are therefore created manually in the dashboard or inserted by
 `seed.sql`. A submission's `eventSlug` may match a local event slug, Webflow item
 ID, or local event ID. If it does not match, the submission is still accepted
 but remains unassigned to an event.
 
-Before implementing event-related enhancements, decide which system owns event
-data:
-
-- If Webflow is the source of truth, implement authenticated CMS synchronization
-  with explicit field mapping, retry behavior, and deletion/archive rules.
-- If D1 is the source of truth, remove the sync stub and update wording that says
-  events are mirrored from Webflow.
+Webflow item IDs are external integration references, not internal event IDs.
+They remain in the database but are no longer editable in the event form.
+CMS field mappings must be isolated to the integration layer. Internal saves
+must succeed even if publishing fails. See [Event catalog API](events-api.md)
+for current fields, pagination, Webflow setup and publishing limitations.
 
 ## 5. Database model
 
@@ -366,7 +367,9 @@ development.
 
 ## 11. Known architectural gaps
 
-- The Webflow CMS event sync function is a stub.
+- Webflow sync currently uses bounded awaited requests and manual retries, not a durable queue.
+  Delete unpublishes before removing the local event. Automatic creation of reference
+  CMS items and a separate archival workflow are not implemented.
 - The browser-visible static `CLIENT_KEY` does not securely authenticate the
   public form.
 - Historical documentation contains exposed credentials and needs redaction

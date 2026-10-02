@@ -26,6 +26,7 @@ frontend or backend service.
 ### Prerequisites
 
 - [Bun](https://bun.sh/) installed
+- Node.js 22.13+ (release scripts and SQLite-backed tests)
 - Git
 
 Cloudflare login is not required for ordinary local development. The
@@ -147,6 +148,7 @@ and the recommended workflow for enhancements.
 
 Additional references:
 
+- [Public event catalog API](docs/events-api.md)
 - [Artist application API](docs/api-submit.md)
 - [Infrastructure provisioning record](docs/infra-provisioning.md)
 - [Admin user manual](docs/manual.md)

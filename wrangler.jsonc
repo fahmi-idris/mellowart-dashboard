@@ -10,6 +10,7 @@
   "main": "./workers/app.ts",
   "vars": {
     "VALUE_FROM_CLOUDFLARE": "Hello from Cloudflare",
+    "WEBFLOW_ASSET_BASE_URL": "",
   },
   "observability": {
     "enabled": true,
@@ -36,6 +37,7 @@
       "name": "mellowart-dev",
       "vars": {
         "VALUE_FROM_CLOUDFLARE": "Hello from Cloudflare",
+        "WEBFLOW_ASSET_BASE_URL": "",
       },
       "d1_databases": [
         {

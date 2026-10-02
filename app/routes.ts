@@ -25,6 +25,8 @@ export default [
   }),
 
   // JSON APIs (resource routes)
+  route("api/events", "routes/api.events.tsx"), // public, paginated event catalog
+  route("event-assets/*", "routes/event-assets.$.tsx"), // public event artwork
   route("api/inquiries", "routes/api.inquiries.tsx"), // admin-only list
   route("api/inquiries/:id", "routes/api.inquiry.$id.tsx"), // admin-only detail
   route("api/summary", "routes/api.summary.tsx"), // admin-only dashboard counts

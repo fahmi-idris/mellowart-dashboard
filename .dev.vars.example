@@ -7,3 +7,12 @@ XERO_CLIENT_ID=""
 XERO_CLIENT_SECRET=""
 GOOGLE_CLIENT_ID=""
 GOOGLE_CLIENT_SECRET=""
+
+# Saving an event publishes it to this Webflow CMS collection.
+# Keep the access token server-side; never commit real credentials.
+WEBFLOW_ACCESS_TOKEN=""
+WEBFLOW_SITE_ID=""
+WEBFLOW_EVENT_COLLECTION_ID=""
+# Optional public HTTPS base URL serving event-assets (needed for images during local development).
+# The deployed app must serve the same uploaded image; localhost is not reachable by Webflow.
+WEBFLOW_ASSET_BASE_URL=""
