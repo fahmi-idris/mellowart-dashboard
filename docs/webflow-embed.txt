@@ -137,10 +137,16 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      // Insurance file
-      const insuranceInput = form.querySelector('input[name="file-2"]');
-      if (insuranceInput?.files?.[0]) {
-        data.set("insurance", insuranceInput.files[0], insuranceInput.files[0].name);
+      // Collect every insurance document; append keeps earlier uploads.
+      const insuranceInputs = form.querySelectorAll(
+        'input[type="file"]'
+      );
+      for (const input of insuranceInputs) {
+        if (!/^insurance-file(?:-[1-9]\d*)?$/.test(input.name) && input.name !== "file-2") continue;
+        if (input.disabled || buddySection?.contains(input)) continue;
+        for (const file of Array.from(input.files || [])) {
+          if (file.size > 0) data.append("insurance", file, file.name);
+        }
       }
 
       // Debug log

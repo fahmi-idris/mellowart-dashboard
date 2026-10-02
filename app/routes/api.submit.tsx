@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import type { Route } from "./+types/api.submit";
 import { ALLOWED_DOC_TYPES, ArtistFieldsSchema, MAX_FILE_BYTES } from "~/lib/artist";
 import { findEventBySlug } from "~/lib/events.server";
-import { collectFormFiles } from "~/lib/form-files";
+import { collectInsuranceFiles } from "~/lib/form-files";
 import { sendConfirmationEmail } from "~/lib/jobs.server";
 import { createArtistSubmission, type UploadFile } from "~/lib/submissions.server";
 
@@ -170,7 +170,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
   // Webflow may repeat the same multipart key or use the conventional [] form.
   // `get()` would silently discard every insurance document after the first.
-  const insuranceFiles = collectFormFiles(form, "insurance", "insurance[]");
+  const insuranceFiles = collectInsuranceFiles(form);
 
   // Optional second-artist portfolio (shared stall). Same rules as the main one.
   const secondPortfolio = pickEntry(

@@ -121,7 +121,7 @@ so the application is filed under that event in the dashboard.
 | Field            | Required | Count     | Per-file rules                                                                                                           |
 | ---------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `portfolio`      | ✅       | exactly 1 | 1-page A4 portfolio (PDF or image) — see below                                                                           |
-| `insurance`      | optional | 0 or more | Certificate of Currency files (PDF or image). Repeat the multipart field for every file. `insurance[]` is also accepted. |
+| `insurance`      | optional | 0 or more | Certificate of Currency files (PDF or image). Repeat the multipart field for every file. `insurance[]`, `insurance-file`, and any numbered Webflow name such as `insurance-file-2` or `insurance-file-12` are also accepted. |
 | `buddyPortfolio` | optional | 0 or 1    | Second artist's portfolio (Webflow `buddy-portfolio-file`, legacy `secondPortfolio`), shared stall only                  |
 
 Per-file rules (apply to every document):
