@@ -277,6 +277,36 @@ console.log("Application id:", data.id);
 > runtime adds it with the correct multipart boundary. Setting it yourself
 > breaks parsing and yields a `400`.
 
+## Copy-ready Webflow submission script
+
+Use [webflow-embed.txt](webflow-embed.txt) for the corrected full browser script.
+It targets the **development** Worker. Replace its `CLIENT_KEY` placeholder with
+the value configured on `mellowart-dev`; for production, change the API URL and
+use the production Worker's key. Keep only one submission script and republish
+Webflow after editing it.
+
+The script matches the current lowercase Webflow field names, validates email
+confirmation and files, includes stall buddy details, and sends all insurance
+documents using repeated multipart `insurance` fields. Separate inputs named
+`insurance-file`, `insurance-file-2`, `insurance-file-3`, etc. are supported with
+no fixed four-file cap. Each file is limited to 10 MB; platform request limits
+still apply. Any separate auto-add upload script may impose its own UI cap.
+
+Bind `eventSlug` to the current CMS slug, not a hardcoded old value. Dashboard
+slug changes are sent to the same linked CMS item on save; after successful sync,
+new submissions should use the new slug. Unknown slugs are stored unassigned.
+
+Native Webflow File Upload components still use Webflow's upload service and
+hosting-plan requirements. This script does not disable those upload handlers:
+it reads actual files from `input.files`, not Webflow `data-value` upload IDs.
+For direct-only uploads, replace native upload widgets with plain HTML file
+inputs inside a Code Embed. A custom insurance input can use `multiple`;
+Webflow's native component selects one file per input.
+
+Verify in browser DevTools that the POST goes to the Worker's `/api/submit` and
+returns `201` with `{ "ok": true, "id": "..." }`. A native Webflow form response
+of `200` alone does not save an application in the dashboard.
+
 ## What happens after submit
 
 1. Documents are stored privately in R2 (`mellow-uploads`); a row is written to
