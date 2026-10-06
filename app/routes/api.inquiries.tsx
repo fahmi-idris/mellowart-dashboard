@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import type { Route } from "./+types/api.inquiries";
 import { requireAdmin } from "~/lib/auth.server";
 import { rowsToCsv } from "~/lib/csv";
+import { getEvent } from "~/lib/events.server";
 import { parseListQuery } from "~/lib/data-table";
 import { d1List, type D1ListConfig } from "~/lib/d1-pagination.server";
 import { getSubmissionsForExport, type SubmissionExportRow } from "~/lib/submissions.server";
@@ -160,22 +161,40 @@ export async function loader({ request }: Route.LoaderArgs) {
         : undefined;
   const config: D1ListConfig = { ...LIST_CONFIG, extraWhere: archiveWhere };
 
-  // Full backup intentionally ignores table search, filters and pagination.
+  // All-event backups require explicit scope; otherwise require one event.
   if (url.searchParams.get("format") === "backup") {
-    const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM submissions").first<{
-      total: number;
-    }>();
-    if (Number(count?.total ?? 0) > 10_000) {
+    const allEvents = url.searchParams.get("scope") === "all";
+    const eventId = query.filters?.event_id;
+    if (!allEvents && !eventId)
+      return Response.json({ error: "Choose an event to back up." }, { status: 400 });
+    const event = !allEvents && eventId ? await getEvent(env.DB, eventId) : null;
+    if (!allEvents && !event) return Response.json({ error: "Event not found." }, { status: 404 });
+    const matching = await d1List(
+      env.DB,
+      allEvents
+        ? { page: 1, pageSize: 1 }
+        : { page: 1, pageSize: 1, filters: { event_id: eventId! } },
+      LIST_CONFIG,
+    );
+    if (matching.total > 10_000) {
       return Response.json(
         { error: "Backup exceeds the supported record count." },
         { status: 413 },
       );
     }
-    const rows = await getSubmissionsForExport(env.DB, {});
-    const images = await env.DB.prepare(
-      "SELECT submission_id AS submissionId, r2_key AS key, size FROM submission_images ORDER BY submission_id, sort_order",
-    ).all<{ submissionId: string; key: string; size: number | null }>();
-    const imageRows = images.results ?? [];
+    const rows = await getSubmissionsForExport(env.DB, allEvents ? {} : { eventId });
+    const imageRows: { submissionId: string; key: string; size: number | null }[] = [];
+    // Bound batches avoid exceeding the D1 query parameter limit. Only selected
+    // submissions' documents may enter the ZIP (including metadata/HTML links).
+    for (let offset = 0; offset < rows.length; offset += 90) {
+      const ids = rows.slice(offset, offset + 90).map((row) => row.id);
+      const images = await env.DB.prepare(
+        `SELECT submission_id AS submissionId, r2_key AS key, size FROM submission_images WHERE submission_id IN (${ids.map(() => "?").join(",")}) ORDER BY submission_id, sort_order`,
+      )
+        .bind(...ids)
+        .all<{ submissionId: string; key: string; size: number | null }>();
+      imageRows.push(...(images.results ?? []));
+    }
     const imagePaths = new Map<string, string[]>();
     for (const image of imageRows) {
       const path = `images/${image.key.replace(/^submissions\//, "")}`;
@@ -208,10 +227,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     }
     const date = new Date().toISOString().slice(0, 10);
+    const eventFilename = event
+      ? (event.slug || event.id).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 100)
+      : "all-events";
     return new Response(zipStream(entries()), {
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="inquiries-backup-${date}.zip"`,
+        "Content-Disposition": `attachment; filename="inquiries-backup-${eventFilename}-${date}.zip"`,
         "Cache-Control": "no-store",
       },
     });

@@ -34,6 +34,7 @@ import { toast } from "sonner";
 
 import type { Route } from "./+types/inquiry";
 import { BaseTable, type FilterDef } from "~/components/base-table";
+import { EventCombobox } from "~/components/event-combobox";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
@@ -1253,6 +1254,9 @@ function InquiryContent({ loaderData }: Route.ComponentProps) {
   const [confirmAction, setConfirmAction] = useState<"status" | "delete" | null>(null);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupCount, setBackupCount] = useState<number | null>(null);
+  const [backupEventId, setBackupEventId] = useState("");
+  const [backupScope, setBackupScope] = useState<"event" | "all">("event");
+  const [profileArtist, setProfileArtist] = useState<Artist | null>(null);
   const bulkFetcher = useFetcher<typeof action>();
   const queryClient = useQueryClient();
   const bulkBusy = bulkFetcher.state !== "idle";
@@ -1406,21 +1410,37 @@ function InquiryContent({ loaderData }: Route.ComponentProps) {
     a.remove();
   }, []);
 
-  const openBackup = useCallback(async () => {
-    try {
-      const res = await fetch("/api/inquiries?page=1&pageSize=1");
-      if (!res.ok) throw new Error();
-      const data = (await res.json()) as Paginated<Artist>;
-      setBackupCount(data.total);
-      setBackupOpen(true);
-    } catch {
-      toast.error("Could not prepare the backup.");
-    }
+  const openBackup = useCallback(() => {
+    setBackupScope("event");
+    setBackupEventId(queryRef.current.filters?.event_id ?? "");
+    setBackupCount(null);
+    setBackupOpen(true);
   }, []);
 
+  useEffect(() => {
+    if (!backupOpen || (backupScope === "event" && !backupEventId)) return;
+    const controller = new AbortController();
+    const sp = new URLSearchParams({ page: "1", pageSize: "1" });
+    if (backupScope === "event") sp.set("filter.event_id", backupEventId);
+    setBackupCount(null);
+    void fetch(`/api/inquiries?${sp}`, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error();
+        const data = (await res.json()) as Paginated<Artist>;
+        if (!controller.signal.aborted) setBackupCount(data.total);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) toast.error("Could not prepare the backup.");
+      });
+    return () => controller.abort();
+  }, [backupOpen, backupEventId, backupScope]);
+
   const downloadBackup = () => {
+    if ((backupScope === "event" && !backupEventId) || backupCount === null) return;
     const a = document.createElement("a");
-    a.href = "/api/inquiries?format=backup";
+    const sp = new URLSearchParams({ format: "backup", scope: backupScope });
+    if (backupScope === "event") sp.set("filter.event_id", backupEventId);
+    a.href = `/api/inquiries?${sp}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1430,6 +1450,13 @@ function InquiryContent({ loaderData }: Route.ComponentProps) {
   return (
     <div className="flex flex-col gap-6">
       <RowActionOverlay />
+      {profileArtist && (
+        <ViewProfileDialog
+          artist={profileArtist}
+          open
+          onOpenChange={(open) => !open && setProfileArtist(null)}
+        />
+      )}
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Artist submissions</h1>
         <p className="text-sm text-muted-foreground">
@@ -1442,6 +1469,8 @@ function InquiryContent({ loaderData }: Route.ComponentProps) {
         queryFn={fetchArtists}
         columns={columns}
         getRowId={(a) => a.id}
+        onRowClick={setProfileArtist}
+        getRowLabel={(a) => `View profile for ${a.name}, ${a.id}`}
         refetchInterval={15000}
         searchPlaceholder="Search name, email, or brand…"
         initialSearch={initialSearchQuery.search}
@@ -1637,17 +1666,58 @@ function InquiryContent({ loaderData }: Route.ComponentProps) {
       <Dialog open={backupOpen} onOpenChange={setBackupOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Back up this data?</DialogTitle>
+            <DialogTitle>Back up submissions</DialogTitle>
             <DialogDescription>
-              Download a ZIP with {backupCount ?? "all"} records: inquiries.csv, inquiries.html and
-              an images folder. Current filters are ignored.
+              {backupScope === "all"
+                ? `Download a ZIP with ${backupCount ?? "…"} submissions across all events, including unassigned submissions.`
+                : backupEventId
+                  ? `Download a ZIP with ${backupCount ?? "…"} submissions for the selected event.`
+                  : "Choose an event to back up."}{" "}
+              Includes CSV, HTML and uploaded documents, including archived submissions. Search,
+              status filters and pagination are ignored.
             </DialogDescription>
           </DialogHeader>
+          <Label htmlFor="backup-scope">Backup scope</Label>
+          <Select
+            value={backupScope}
+            onValueChange={(value) => {
+              setBackupCount(null);
+              setBackupScope(value === "all" ? "all" : "event");
+            }}
+          >
+            <SelectTrigger id="backup-scope" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="event">One event</SelectItem>
+              <SelectItem value="all">All events</SelectItem>
+            </SelectContent>
+          </Select>
+          {backupScope === "event" && (
+            <>
+              <Label>Event</Label>
+              <EventCombobox
+                events={events}
+                value={backupEventId}
+                onValueChange={(id) => {
+                  setBackupCount(null);
+                  setBackupEventId(id);
+                }}
+                ariaLabel="Event to back up"
+                className="w-full"
+                disabled={events.length === 0}
+              />
+            </>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setBackupOpen(false)}>
               No
             </Button>
-            <Button type="button" onClick={downloadBackup}>
+            <Button
+              type="button"
+              onClick={downloadBackup}
+              disabled={(backupScope === "event" && !backupEventId) || backupCount === null}
+            >
               Yes, back up
             </Button>
           </DialogFooter>

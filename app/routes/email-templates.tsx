@@ -73,6 +73,8 @@ import {
   type EmailBranding,
   MERGE_TAGS,
   normalizeEmailBranding,
+  normalizeHexColor,
+  BRAND_COLOR_KEYS,
   newBlock,
   reorderEmailBlocks,
   sampleContext,
@@ -297,6 +299,21 @@ export async function action({ request }: Route.ActionArgs) {
         String(form.get("branding") ?? "null"),
       ) as EmailBranding | null;
       if (!rawBranding) return { ok: false, message: "Brand style is missing." };
+      if (typeof rawBranding.fromName !== "string" || !rawBranding.fromName.trim()) {
+        return { ok: false, message: "From name cannot be empty." };
+      }
+      if (
+        typeof rawBranding.contactEmail !== "string" ||
+        (rawBranding.contactEmail.trim() &&
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawBranding.contactEmail.trim()))
+      ) {
+        return { ok: false, message: "Enter a valid contact email address." };
+      }
+      for (const key of BRAND_COLOR_KEYS) {
+        if (typeof rawBranding[key] !== "string" || !normalizeHexColor(rawBranding[key])) {
+          return { ok: false, message: `Invalid ${key} color. Use a hex color such as #2C2422.` };
+        }
+      }
       const branding = normalizeEmailBranding(rawBranding);
       await publishEventTemplate(env.DB, eventId, key, content, branding, session.email);
       return { ok: true, message: `Published “${TEMPLATE_META[key].label}” for ${event.name}.` };
@@ -1999,7 +2016,7 @@ function BrandingEditor({
         <input
           type="color"
           aria-label={`${label} color picker`}
-          value={branding[key]}
+          value={normalizeHexColor(branding[key]) ?? "#000000"}
           onChange={(event) => set({ [key]: event.target.value })}
           className="size-9 shrink-0 cursor-pointer rounded border bg-background p-1"
         />
@@ -2007,6 +2024,12 @@ function BrandingEditor({
           aria-label={`${label} hex color`}
           value={branding[key]}
           onChange={(event) => set({ [key]: event.target.value })}
+          onBlur={() => {
+            const normalized = normalizeHexColor(branding[key]);
+            if (normalized) set({ [key]: normalized });
+          }}
+          aria-invalid={!normalizeHexColor(branding[key])}
+          placeholder="#2C2422"
           className="min-w-0 flex-1 font-mono text-xs"
         />
       </div>
@@ -2077,6 +2100,10 @@ function BrandingEditor({
         </Field>
       )}
       <BrandSection title="Colors" />
+      <p className="text-xs text-muted-foreground">
+        Use #RGB or #RRGGBB. Text contrast adjusts automatically. Invalid colors must be corrected
+        before publishing.
+      </p>
       <div className="grid grid-cols-2 gap-3">
         {colorField("brandColor", "Brand / hero")}
         {colorField("accentColor", "Accent (pill)")}

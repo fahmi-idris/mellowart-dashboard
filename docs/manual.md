@@ -112,8 +112,9 @@ categories, Instagram, website, internal notes, prior applications, and second
 artist fields. Use **Columns** to show or hide optional table fields.
 
 **Copy emails** copies addresses matching the current filters. **Export CSV**
-downloads the filtered records. **Backup data** downloads all submissions as a
-ZIP with CSV, HTML, and uploaded documents; filters are ignored.
+downloads the filtered records. **Backup data** downloads a ZIP with CSV, HTML,
+and uploaded documents for a chosen event or all events, including archived
+submissions. The current event is preselected for the single-event option.
 
 ### Viewing details
 
@@ -187,6 +188,28 @@ reconcile it by hand:
    matching status: **Awaiting payment**, **Paid**, **Overdue**, or **Voided**.
 
 This keeps the dashboard badge in sync with reality.
+
+### Submission rows and backups
+
+Click any non-interactive cell in an artist submission row to open its profile;
+focused rows also open with Enter or Space. Checkboxes, links, status selectors
+and action buttons keep their own behavior.
+
+**Backup data** offers **One event** or **All events**. Single-event ZIPs contain
+only that event's submissions and documents. All-event ZIPs contain all submissions
+and documents, including unassigned records. Both include archived submissions.
+Search, status filters and pagination are ignored so the event backup is complete.
+The dialog shows the event's submission count. The event slug appears in the ZIP
+filename; all-event backups use `all-events` in the filename. The API requires
+`format=backup&filter.event_id=EVENT_ID` for one event and rejects missing/unknown
+events. Use `format=backup&scope=all` explicitly for all events.
+
+### Email branding
+
+Brand colors accept #RGB or #RRGGBB; invalid colors cannot be published. Hero,
+pill, solid-button, header and footer text contrast adjusts to their background.
+Brand changes remain event-scoped and are saved with **Publish changes**.
+The footer contact email is rendered as a clickable `mailto:` link.
 
 ---
 

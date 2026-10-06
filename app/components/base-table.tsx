@@ -35,6 +35,7 @@ import {
   type SortState,
 } from "~/lib/data-table";
 import { cn } from "~/lib/utils";
+import { shouldActivateTableRow } from "~/lib/table-row-click";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Input } from "~/components/ui/input";
@@ -87,6 +88,9 @@ export interface BaseTableProps<T> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   columns: ColumnDef<T, any>[];
   getRowId: (row: T) => string;
+  /** Open a row without intercepting its links, buttons or selection controls. */
+  onRowClick?: (row: T) => void;
+  getRowLabel?: (row: T) => string;
 
   searchable?: boolean;
   searchPlaceholder?: string;
@@ -147,6 +151,8 @@ export function BaseTable<T>({
   queryFn,
   columns,
   getRowId,
+  onRowClick,
+  getRowLabel,
   searchable = true,
   searchPlaceholder = "Search…",
   initialSearch = "",
@@ -688,7 +694,31 @@ export function BaseTable<T>({
                   </TableRow>
                 ) : (
                   table.getRowModel().rows.map((row) => (
-                    <TableRow key={row.id}>
+                    <TableRow
+                      key={row.id}
+                      className={
+                        onRowClick
+                          ? "cursor-pointer focus-visible:outline-2 focus-visible:outline-ring"
+                          : undefined
+                      }
+                      tabIndex={onRowClick ? 0 : undefined}
+                      aria-label={onRowClick ? getRowLabel?.(row.original) : undefined}
+                      onClick={(event) => {
+                        if (
+                          !onRowClick ||
+                          !shouldActivateTableRow(event, window.getSelection()?.toString())
+                        )
+                          return;
+                        onRowClick(row.original);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget || !onRowClick) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onRowClick(row.original);
+                        }
+                      }}
+                    >
                       {onSelectedIdsChange && (
                         <TableCell>
                           <Checkbox
@@ -729,7 +759,33 @@ export function BaseTable<T>({
               </p>
             ) : (
               rows.map((row) => (
-                <React.Fragment key={getRowId(row)}>{renderGridItem?.(row)}</React.Fragment>
+                <div
+                  key={getRowId(row)}
+                  className={
+                    onRowClick
+                      ? "cursor-pointer rounded-lg focus-visible:outline-2 focus-visible:outline-ring"
+                      : undefined
+                  }
+                  tabIndex={onRowClick ? 0 : undefined}
+                  aria-label={onRowClick ? getRowLabel?.(row) : undefined}
+                  onClick={(event) => {
+                    if (
+                      onRowClick &&
+                      shouldActivateTableRow(event, window.getSelection()?.toString())
+                    ) {
+                      onRowClick(row);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget || !onRowClick) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onRowClick(row);
+                    }
+                  }}
+                >
+                  {renderGridItem?.(row)}
+                </div>
               ))
             )}
           </div>
@@ -747,7 +803,33 @@ export function BaseTable<T>({
               <p className="py-12 text-center text-muted-foreground">{emptyMessage}</p>
             ) : (
               rows.map((row) => (
-                <React.Fragment key={getRowId(row)}>{renderListItem?.(row)}</React.Fragment>
+                <div
+                  key={getRowId(row)}
+                  className={
+                    onRowClick
+                      ? "cursor-pointer focus-visible:outline-2 focus-visible:outline-ring"
+                      : undefined
+                  }
+                  tabIndex={onRowClick ? 0 : undefined}
+                  aria-label={onRowClick ? getRowLabel?.(row) : undefined}
+                  onClick={(event) => {
+                    if (
+                      onRowClick &&
+                      shouldActivateTableRow(event, window.getSelection()?.toString())
+                    ) {
+                      onRowClick(row);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget || !onRowClick) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onRowClick(row);
+                    }
+                  }}
+                >
+                  {renderListItem?.(row)}
+                </div>
               ))
             )}
           </div>

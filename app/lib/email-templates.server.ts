@@ -12,6 +12,7 @@ import {
   DEFAULT_BRANDING,
   DEFAULT_TEMPLATES,
   normalizeEmailBranding,
+  emailForeground,
   type EmailBlock,
   type EmailBranding,
   type SummaryBlock,
@@ -119,16 +120,17 @@ function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, s
   if (isHidden(block, ctx)) return "";
   switch (block.type) {
     case "hero": {
+      const foreground = emailForeground(br.brandColor);
       const tag = (block.tag ?? "").trim()
-        ? `<div style="display:inline-block;background:${br.accentColor};color:${br.brandColor};font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:6px 16px;border-radius:999px;margin-bottom:20px">${interpolateHtml(block.tag!, ctx)}</div>`
+        ? `<div style="display:inline-block;background:${br.accentColor};color:${emailForeground(br.accentColor)};font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:6px 16px;border-radius:999px;margin-bottom:20px">${interpolateHtml(block.tag!, ctx)}</div>`
         : "";
       const subtext = (block.subtext ?? "").trim()
-        ? `<p style="font-size:14px;color:#BEB5B2;line-height:1.7;margin:0">${interpolateHtml(block.subtext!, ctx)}</p>`
+        ? `<p style="font-size:14px;color:${foreground};line-height:1.7;margin:0">${interpolateHtml(block.subtext!, ctx)}</p>`
         : "";
       const ref = block.showReference
-        ? `<div style="display:inline-block;margin-top:16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:12px;letter-spacing:.08em;padding:6px 16px;border-radius:8px;font-family:monospace">${interpolateHtml("{{reference}}", ctx)}</div>`
+        ? `<div style="display:inline-block;margin-top:16px;border:1px solid ${foreground};color:${foreground};font-size:12px;letter-spacing:.08em;padding:6px 16px;border-radius:8px;font-family:monospace">${interpolateHtml("{{reference}}", ctx)}</div>`
         : "";
-      return `<div style="background:${br.brandColor};padding:40px;text-align:center">${tag}<h1 style="font-size:26px;font-weight:600;color:#fff;line-height:1.3;margin:0 0 12px">${interpolateHtml(block.heading, ctx)}</h1>${subtext}${ref}</div>`;
+      return `<div style="background:${br.brandColor};padding:40px;text-align:center">${tag}<h1 style="font-size:26px;font-weight:600;color:${foreground};line-height:1.3;margin:0 0 12px">${interpolateHtml(block.heading, ctx)}</h1>${subtext}${ref}</div>`;
     }
     case "image": {
       const rawUrl = interpolateRaw(block.url ?? "", ctx).trim();
@@ -161,7 +163,7 @@ function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, s
       const style =
         block.variant === "outline"
           ? `${base};background:transparent;color:${br.buttonColor};border:1.5px solid ${br.buttonColor}`
-          : `${base};background:${br.buttonColor};color:#fff`;
+          : `${base};background:${br.buttonColor};color:${emailForeground(br.buttonColor)}`;
       return `<div style="padding:20px 40px;"><a href="${url}" style="${style}">${interpolateHtml(block.label, ctx)}</a></div>`;
     }
     case "summary":
@@ -179,12 +181,13 @@ function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, s
 
 function shell(bodyHtml: string, br: EmailBranding, preview = false): string {
   const branding = normalizeEmailBranding(br);
+  const footerColor = emailForeground(branding.footerBg);
   const safeUrl = (value: string) => (/^https?:\/\//i.test(value.trim()) ? value.trim() : "");
   const social = branding.socialLinks
     .filter((link) => link.label.trim() && safeUrl(link.url))
     .map(
       (link) =>
-        `<a href="${escapeHtml(safeUrl(link.url))}" style="color:#BEB5B2;font-size:12px;text-decoration:none;margin:0 8px">${escapeHtml(link.label)}</a>`,
+        `<a href="${escapeHtml(safeUrl(link.url))}" style="color:${footerColor};font-size:12px;text-decoration:underline;margin:0 8px">${escapeHtml(link.label)}</a>`,
     )
     .join("");
   const website = branding.socialLinks.find(
@@ -197,7 +200,7 @@ function shell(bodyHtml: string, br: EmailBranding, preview = false): string {
   const footerLogo = safeUrl(br.footerLogoUrl);
   const headerImage = headerLogo
     ? `<img src="${escapeHtml(headerLogo)}" alt="${escapeHtml(br.fromName)}" style="${branding.headerLogoWidth ? `width:${branding.headerLogoWidth}px;max-width:100%;height:auto` : "height:44px;width:auto"}"/>`
-    : `<strong style="font-size:22px;letter-spacing:.08em;color:${br.brandColor}">${escapeHtml(br.fromName)}</strong>`;
+    : `<strong style="font-size:22px;letter-spacing:.08em;color:${emailForeground(br.headerBg)}">${escapeHtml(br.fromName)}</strong>`;
   const footerImage = footerLogo
     ? `<img src="${escapeHtml(footerLogo)}" alt="${escapeHtml(br.fromName)}" style="height:32px;width:auto;margin-bottom:14px;opacity:.9"/>`
     : "";
@@ -211,7 +214,7 @@ function shell(bodyHtml: string, br: EmailBranding, preview = false): string {
     <div${preview ? ' data-email-branding="Footer"' : ""} style="background:${footerBg};padding:28px 40px;text-align:center">
       ${footerImage}
       <div style="margin:12px 0">${social}</div>
-      <p style="font-size:12px;color:#7A6E6C;line-height:1.7;margin:0">${websiteUrl ? `<a href="${escapeHtml(websiteUrl)}" style="color:#BEB5B2;text-decoration:none">${escapeHtml(websiteUrl)}</a><br/>` : ""}${escapeHtml(br.contactEmail)}<br/><br/>${footerText}</p>
+      <p style="font-size:12px;color:${footerColor};line-height:1.7;margin:0">${websiteUrl ? `<a href="${escapeHtml(websiteUrl)}" style="color:${footerColor};text-decoration:underline">${escapeHtml(websiteUrl)}</a><br/>` : ""}${br.contactEmail.trim() ? `<a href="mailto:${escapeHtml(encodeURIComponent(br.contactEmail.trim()))}" style="color:${footerColor};text-decoration:underline">${escapeHtml(br.contactEmail.trim())}</a>` : ""}<br/><br/>${footerText}</p>
     </div>
   </div>
 </body></html>`;
@@ -224,6 +227,7 @@ export function renderContent(
   ctx: Record<string, string>,
   options: { includeBlockMarkers?: boolean } = {},
 ): { subject: string; html: string } {
+  br = normalizeEmailBranding(br);
   const withDefaults = { contactEmail: br.contactEmail, ...ctx };
   const body = content.blocks
     .map((block) => {

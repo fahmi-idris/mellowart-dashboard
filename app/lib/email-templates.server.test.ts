@@ -4,6 +4,8 @@ import {
   DEFAULT_BRANDING,
   DEFAULT_TEMPLATES,
   normalizeEmailBranding,
+  normalizeHexColor,
+  emailForeground,
   reorderEmailBlocks,
   type TemplateContent,
 } from "./email-templates";
@@ -23,6 +25,45 @@ const content = (blocks: TemplateContent["blocks"]): TemplateContent => ({
 });
 
 describe("renderContent", () => {
+  it("normalizes shorthand colors and rejects invalid CSS", () => {
+    expect(normalizeHexColor(" #abc ")).toBe("#AABBCC");
+    expect(normalizeHexColor("red;display:none")).toBeNull();
+    expect(
+      normalizeEmailBranding({ brandColor: '" onclick="alert(1)', headerBg: "#fff" }).brandColor,
+    ).toBe(DEFAULT_BRANDING.brandColor);
+    expect(normalizeEmailBranding({ headerBg: "#fff" }).headerBg).toBe("#FFFFFF");
+    expect(emailForeground("#ffffff")).toBe("#000000");
+    expect(emailForeground("#000000")).toBe("#FFFFFF");
+  });
+
+  it("uses readable foregrounds and a clickable escaped contact email", () => {
+    const rendered = renderContent(
+      content([
+        {
+          id: "hero",
+          type: "hero",
+          heading: "Hello",
+          tag: "Event",
+          subtext: "Details",
+          showReference: true,
+        },
+        { id: "button", type: "button", label: "Go", url: "https://example.com", variant: "solid" },
+      ]),
+      {
+        ...DEFAULT_BRANDING,
+        brandColor: "#fff",
+        accentColor: "#fff",
+        buttonColor: "#fff",
+        footerBg: "#fff",
+        contactEmail: "hello+events@example.com",
+      },
+      {},
+    );
+    expect(rendered.html).toContain("background:#FFFFFF;color:#000000");
+    expect(rendered.html).toContain('href="mailto:hello%2Bevents%40example.com"');
+    expect(rendered.html).toContain(">hello+events@example.com</a>");
+    expect(rendered.html).not.toContain("color:#fff");
+  });
   it("includes an optional withdrawal reason only when supplied", () => {
     const context = { firstName: "Ada", reference: "ART-1", reason: "Requested by applicant" };
     const withReason = renderContent(DEFAULT_TEMPLATES.withdrawn, DEFAULT_BRANDING, context);

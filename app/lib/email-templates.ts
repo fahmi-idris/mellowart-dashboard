@@ -259,9 +259,52 @@ export const DEFAULT_BRANDING: EmailBranding = {
   ],
 };
 
+export const BRAND_COLOR_KEYS = [
+  "brandColor",
+  "accentColor",
+  "buttonColor",
+  "headerBg",
+  "footerBg",
+] as const;
+
+/** HTML color inputs require six digits; also accept shorthand in the text field. */
+export function normalizeHexColor(value: string): string | null {
+  const hex = value.trim();
+  if (/^#[\da-f]{6}$/i.test(hex)) return hex.toUpperCase();
+  if (/^#[\da-f]{3}$/i.test(hex))
+    return (
+      "#" +
+      [...hex.slice(1)]
+        .map((c) => c + c)
+        .join("")
+        .toUpperCase()
+    );
+  return null;
+}
+
+/** Choose the higher-contrast foreground for a configurable background. */
+export function emailForeground(background: string): string {
+  const hex = normalizeHexColor(background) ?? "#2C2422";
+  const channels = [1, 3, 5].map((offset) => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  });
+  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  return (luminance + 0.05) / 0.05 > 1.05 / (luminance + 0.05) ? "#000000" : "#FFFFFF";
+}
+
 /** Populate new branding fields when reading older global/event settings. */
 export function normalizeEmailBranding(raw: Partial<EmailBranding>): EmailBranding {
   const branding = { ...DEFAULT_BRANDING, ...raw };
+  // Old rows may have null fields; never pass invalid strings into HTML/CSS.
+  for (const key of Object.keys(DEFAULT_BRANDING) as (keyof EmailBranding)[]) {
+    if (typeof DEFAULT_BRANDING[key] === "string" && typeof branding[key] !== "string") {
+      Object.assign(branding, { [key]: DEFAULT_BRANDING[key] });
+    }
+  }
+  for (const key of BRAND_COLOR_KEYS) {
+    branding[key] = normalizeHexColor(branding[key]) ?? DEFAULT_BRANDING[key];
+  }
   return {
     ...branding,
     headerLogoWidth:

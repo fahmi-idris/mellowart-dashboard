@@ -118,11 +118,11 @@ so the application is filed under that event in the dashboard.
 
 ### Document files
 
-| Field            | Required | Count     | Per-file rules                                                                                                           |
-| ---------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `portfolio`      | ✅       | exactly 1 | 1-page A4 portfolio (PDF or image) — see below                                                                           |
+| Field            | Required | Count     | Per-file rules                                                                                                                                                                                                               |
+| ---------------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `portfolio`      | ✅       | exactly 1 | 1-page A4 portfolio (PDF or image) — see below                                                                                                                                                                               |
 | `insurance`      | optional | 0 or more | Certificate of Currency files (PDF or image). Repeat the multipart field for every file. `insurance[]`, `insurance-file`, and any numbered Webflow name such as `insurance-file-2` or `insurance-file-12` are also accepted. |
-| `buddyPortfolio` | optional | 0 or 1    | Second artist's portfolio (Webflow `buddy-portfolio-file`, legacy `secondPortfolio`), shared stall only                  |
+| `buddyPortfolio` | optional | 0 or 1    | Second artist's portfolio (Webflow `buddy-portfolio-file`, legacy `secondPortfolio`), shared stall only                                                                                                                      |
 
 Per-file rules (apply to every document):
 
@@ -308,6 +308,22 @@ returns `201` with `{ "ok": true, "id": "..." }`. A native Webflow form response
 of `200` alone does not save an application in the dashboard.
 
 ## What happens after submit
+
+### Webflow textarea auto-expansion
+
+Install [webflow-auto-expand.txt](webflow-auto-expand.txt) as a **separate** script
+before `</body>` on the artist application page. It resizes every textarea in
+`#wf-form-artist-application`, including `artist-bio`, `product-info`, buddy fields,
+and `other`. It handles prefilled text, typing/pasting, hidden buddy sections,
+new fields and viewport/font changes. Height is overridden with `!important` so
+fixed Webflow textarea styling does not restrict expansion.
+
+Remove the older `enableAutoGrow('#other')` call and the `#other`-only
+`field-sizing: content` rule. Keep the submission script. Republish Webflow;
+for Console testing paste the script contents without the `<script>` tags.
+The ready-state check supports both normal loading and late browser injection.
+
+### Submission workflow
 
 1. Documents are stored privately in R2 (`mellow-uploads`); a row is written to
    D1 (linked to the event if `eventSlug` matched). Stall preferences are saved
