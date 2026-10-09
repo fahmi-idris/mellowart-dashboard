@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { readFileSync } from "node:fs";
 
 import {
   DEFAULT_BRANDING,
   DEFAULT_TEMPLATES,
   normalizeEmailBranding,
   normalizeHexColor,
+  summaryColorError,
   emailForeground,
   reorderEmailBlocks,
   type TemplateContent,
@@ -24,7 +27,126 @@ const content = (blocks: TemplateContent["blocks"]): TemplateContent => ({
   blocks,
 });
 
+describe("email color migration", () => {
+  it("preserves existing branding and round-trips global colors through real SQLite", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      for (const migration of [
+        "0016_email_templates.sql",
+        "0017_email_footer_branding.sql",
+        "0023_email_body_summary_colors.sql",
+      ])
+        sqlite.exec(readFileSync(`migrations/${migration}`, "utf8"));
+      const db = {
+        prepare(sql: string) {
+          let values: SQLInputValue[] = [];
+          return {
+            bind(...args: SQLInputValue[]) {
+              values = args;
+              return this;
+            },
+            async first() {
+              return sqlite.prepare(sql).get(...values) ?? null;
+            },
+            async run() {
+              return sqlite.prepare(sql).run(...values);
+            },
+          };
+        },
+      } as unknown as D1Database;
+      const previous = await getBranding(db);
+      expect(previous.fromName).toBe("Mellow Art");
+      expect(previous.bodyBg).toBe(DEFAULT_BRANDING.bodyBg);
+      expect(previous.summaryBg).toBe(DEFAULT_BRANDING.summaryBg);
+      const updated = {
+        ...previous,
+        bodyBg: "#123456",
+        bodyTextColor: "#ABCDEF",
+        heroTextColor: "#FFFFFF",
+        summaryBg: "#654321",
+        summaryTextColor: "#FEDCBA",
+      };
+      await updateBranding(db, updated);
+      expect(await getBranding(db)).toMatchObject(updated);
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
 describe("renderContent", () => {
+  it("keeps summary colors per block, with fallback for older blocks and invalid preview drafts", () => {
+    const blocks: TemplateContent["blocks"] = [
+      {
+        id: "one",
+        type: "summary",
+        backgroundColor: "#123",
+        textColor: "#fff",
+        rows: [{ label: "First", value: "1" }],
+      },
+      {
+        id: "two",
+        type: "summary",
+        backgroundColor: "#456789",
+        textColor: "#FFEEDD",
+        rows: [{ label: "Second", value: "2" }],
+      },
+      { id: "old", type: "summary", rows: [{ label: "Legacy", value: "3" }] },
+    ];
+    const branding = { ...DEFAULT_BRANDING, summaryBg: "#ABCDEF", summaryTextColor: "#222222" };
+    const html = renderContent(content(blocks), branding, {}).html;
+    expect(html).toContain("background:#112233;border:1.5px");
+    expect(html).toContain("background:#456789;border:1.5px");
+    expect(html).toContain("background:#ABCDEF;border:1.5px");
+    expect(html).toContain("color:#FFFFFF");
+    expect(html).toContain("color:#FFEEDD");
+    expect(summaryColorError(blocks)).toBeNull();
+    const invalid: TemplateContent["blocks"] = [
+      { id: "invalid", type: "summary", backgroundColor: "red;display:none", rows: [] },
+    ];
+    expect(summaryColorError(invalid)).toContain("Invalid summary background");
+    expect(renderContent(content(invalid), branding, {}).html).toContain(
+      "background:#ABCDEF;border:1.5px",
+    );
+    expect(renderContent(content(invalid), branding, {}).html).not.toContain("display:none");
+  });
+  it("applies body colors and keeps summary colors separate from header colors", () => {
+    const branding = {
+      ...DEFAULT_BRANDING,
+      headerBg: "#235326",
+      bodyBg: "#112233",
+      bodyTextColor: "#F1F2F3",
+      summaryBg: "#445566",
+      summaryTextColor: "#FFEEDD",
+      heroTextColor: "#FFFFFF",
+    };
+    const template = content([
+      { id: "hero", type: "hero", heading: "Hello", subtext: "Approved" },
+      { id: "p", type: "paragraph", text: "Body copy" },
+      { id: "h", type: "heading", text: "Heading" },
+      { id: "l", type: "list", ordered: false, items: ["Item"] },
+      { id: "s", type: "summary", rows: [{ label: "Stall", value: "{{offeredStall}}" }] },
+    ]);
+    const html = renderContent(template, branding, { offeredStall: "Flagship" }).html;
+    expect(html).toContain("background:#112233;color:#F1F2F3");
+    expect(html).toContain("line-height:1.7;color:#F1F2F3");
+    expect(html).toContain("background:#445566;border:1.5px");
+    expect(html).toContain("color:#FFEEDD");
+    expect(html).toContain("font-size:14px;color:#FFFFFF;line-height:1.7");
+    expect(html).toContain("Flagship");
+    const changedHeader = renderContent(template, { ...branding, headerBg: "#000000" }, {}).html;
+    expect(changedHeader).toContain("background:#445566;border:1.5px");
+  });
+  it("renders the actual offered stall in the default invoice summary", () => {
+    const html = renderContent(DEFAULT_TEMPLATES.approval, DEFAULT_BRANDING, {
+      offeredStall: "Flagship – Debut",
+      stallType: "Mini",
+      amount: "AUD 520.00",
+    }).html;
+    expect(html).toContain("Offered Stall");
+    expect(html).toContain("Flagship – Debut");
+    expect(html).not.toContain(">Mini<");
+  });
   it("normalizes shorthand colors and rejects invalid CSS", () => {
     expect(normalizeHexColor(" #abc ")).toBe("#AABBCC");
     expect(normalizeHexColor("red;display:none")).toBeNull();
@@ -334,6 +456,51 @@ describe("event-scoped email settings", () => {
 
     const fallback = fakeDb({ globalTemplate, eventTemplate: { ...eventTemplate, blocks: "{" } });
     expect((await getTemplate(fallback.db, "approval", "event-b")).subject).toBe("Global");
+  });
+  it("upgrades existing customized invoice summaries without duplicating the offered stall", async () => {
+    const block = {
+      id: "custom-summary",
+      type: "summary",
+      label: "My invoice",
+      rows: [{ label: "Total", value: "{{amount}}" }],
+    };
+    for (const scope of ["globalTemplate", "eventTemplate"]) {
+      const { db } = fakeDb({
+        [scope]: { subject: "Custom", preheader: "", blocks: JSON.stringify([block]) },
+      });
+      const saved = await getTemplate(db, "approval", "event-a");
+      expect(saved.subject).toBe("Custom");
+      expect(saved.blocks[0]).toMatchObject({
+        label: "My invoice",
+        rows: [block.rows[0], { label: "Offered Stall", value: "{{offeredStall}}" }],
+      });
+      const again = fakeDb({
+        [scope]: { subject: saved.subject, blocks: JSON.stringify(saved.blocks) },
+      });
+      expect((await getTemplate(again.db, "approval", "event-a")).blocks).toEqual(saved.blocks);
+    }
+  });
+  it("persists new colors in event JSON and global columns", async () => {
+    const { db, calls } = fakeDb({});
+    const branding = {
+      ...DEFAULT_BRANDING,
+      bodyBg: "#111111",
+      bodyTextColor: "#EEEEEE",
+      heroTextColor: "#FFFFFF",
+      summaryBg: "#222222",
+      summaryTextColor: "#DDDDDD",
+    };
+    await updateBranding(db, branding, "event-a");
+    expect(JSON.parse(String(calls[0].values[1]))).toMatchObject(branding);
+    await updateBranding(db, branding);
+    expect(calls[1].sql).toContain("summary_text_color = excluded.summary_text_color");
+    expect(calls[1].values.slice(-5)).toEqual([
+      branding.bodyBg,
+      branding.bodyTextColor,
+      branding.heroTextColor,
+      branding.summaryBg,
+      branding.summaryTextColor,
+    ]);
   });
 
   it("isolates saved templates and branding by event ID", async () => {

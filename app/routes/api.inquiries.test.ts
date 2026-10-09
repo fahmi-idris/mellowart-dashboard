@@ -29,13 +29,16 @@ describe("scoped inquiry backups", () => {
     mocks.requireAdmin.mockResolvedValue({ email: "admin@example.com" });
     mocks.event.mockResolvedValue({ id: "EVT-A", slug: "summer-market" });
     mocks.list.mockResolvedValue({ total: 1, data: [] });
-    mocks.exportRows.mockResolvedValue([{ id: "ART-A", firstName: "Alice" }]);
+    mocks.exportRows.mockResolvedValue([
+      { id: "ART-A", firstName: "Alice", brandName: "Mellow Art Market" },
+    ]);
     mocks.prepare.mockImplementation(() => ({
       bind: (...ids: string[]) => ({
         all: async () => ({
           results: ids.map((id) => ({
             submissionId: id,
             key: "submissions/" + id + "/insurance.pdf",
+            kind: "insurance",
             size: 4,
           })),
         }),
@@ -61,7 +64,10 @@ describe("scoped inquiry backups", () => {
     );
     expect(mocks.prepare.mock.calls[0][0]).toContain("WHERE submission_id IN (?)");
     const text = new TextDecoder().decode(await response.arrayBuffer());
-    expect(text).toContain("images/ART-A/insurance.pdf");
+    expect(text).toContain("ART-A - Mellow Art Market/Insurance Mellow Art Market.pdf");
+    expect(text).toContain(
+      'href="ART-A%20-%20Mellow%20Art%20Market/Insurance%20Mellow%20Art%20Market.pdf"',
+    );
     expect(mocks.get).toHaveBeenCalledExactlyOnceWith("submissions/ART-A/insurance.pdf");
   });
 
@@ -71,6 +77,39 @@ describe("scoped inquiry backups", () => {
     expect(mocks.list.mock.calls[0][1]).toEqual({ page: 1, pageSize: 1 });
     expect(mocks.event).not.toHaveBeenCalled();
     expect(mocks.list.mock.calls[0][2].extraWhere).toBeUndefined();
+  });
+  it("downloads renamed portfolios and multiple insurance files from unchanged R2 keys", async () => {
+    const documents = [
+      {
+        submissionId: "ART-A",
+        kind: "portfolio",
+        key: "submissions/ART-A/portfolio/uuid.pdf",
+        size: 4,
+      },
+      {
+        submissionId: "ART-A",
+        kind: "insurance",
+        key: "submissions/ART-A/insurance/uuid-1.pdf",
+        size: 4,
+      },
+      {
+        submissionId: "ART-A",
+        kind: "insurance",
+        key: "submissions/ART-A/insurance/uuid-2.pdf",
+        size: 4,
+      },
+    ];
+    mocks.prepare.mockImplementation(() => ({
+      bind: () => ({ all: async () => ({ results: documents }) }),
+    }));
+    const response = await backup("scope=all");
+    const zip = new TextDecoder().decode(await response.arrayBuffer());
+    expect(zip).toContain("ART-A - Mellow Art Market/Portfolio Mellow Art Market.pdf");
+    expect(zip).toContain("ART-A - Mellow Art Market/Insurance Mellow Art Market.pdf");
+    expect(zip).toContain("ART-A - Mellow Art Market/Insurance Mellow Art Market (2).pdf");
+    expect(mocks.get.mock.calls.map(([key]) => key)).toEqual(
+      documents.map((document) => document.key),
+    );
   });
 
   it("rejects missing or unknown events without reading any submissions", async () => {

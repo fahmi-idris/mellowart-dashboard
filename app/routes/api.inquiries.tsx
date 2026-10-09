@@ -8,6 +8,7 @@ import { parseListQuery } from "~/lib/data-table";
 import { d1List, type D1ListConfig } from "~/lib/d1-pagination.server";
 import { getSubmissionsForExport, type SubmissionExportRow } from "~/lib/submissions.server";
 import { zipStream, type ZipEntry } from "~/lib/zip.server";
+import { nameBackupDocuments, type BackupDocument } from "~/lib/inquiry-backup";
 
 const yesNo = (v: number) => (v ? "yes" : "no");
 const escapeHtml = (value: unknown) =>
@@ -183,22 +184,25 @@ export async function loader({ request }: Route.LoaderArgs) {
       );
     }
     const rows = await getSubmissionsForExport(env.DB, allEvents ? {} : { eventId });
-    const imageRows: { submissionId: string; key: string; size: number | null }[] = [];
+    const imageRows: BackupDocument[] = [];
     // Bound batches avoid exceeding the D1 query parameter limit. Only selected
     // submissions' documents may enter the ZIP (including metadata/HTML links).
     for (let offset = 0; offset < rows.length; offset += 90) {
       const ids = rows.slice(offset, offset + 90).map((row) => row.id);
       const images = await env.DB.prepare(
-        `SELECT submission_id AS submissionId, r2_key AS key, size FROM submission_images WHERE submission_id IN (${ids.map(() => "?").join(",")}) ORDER BY submission_id, sort_order`,
+        `SELECT submission_id AS submissionId, r2_key AS key, kind, size FROM submission_images WHERE submission_id IN (${ids.map(() => "?").join(",")}) ORDER BY submission_id, sort_order, id`,
       )
         .bind(...ids)
-        .all<{ submissionId: string; key: string; size: number | null }>();
+        .all<BackupDocument>();
       imageRows.push(...(images.results ?? []));
     }
     const imagePaths = new Map<string, string[]>();
-    for (const image of imageRows) {
-      const path = `images/${image.key.replace(/^submissions\//, "")}`;
-      imagePaths.set(image.submissionId, [...(imagePaths.get(image.submissionId) ?? []), path]);
+    const documents = nameBackupDocuments(rows, imageRows);
+    for (const document of documents) {
+      imagePaths.set(document.submissionId, [
+        ...(imagePaths.get(document.submissionId) ?? []),
+        document.name,
+      ]);
     }
     const estimatedBytes = imageRows.reduce((n, item) => n + Number(item.size ?? 0), 0);
     if (estimatedBytes >= 3_500_000_000 || imageRows.length + 3 > 65535) {
@@ -211,12 +215,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       EXPORT_COLUMNS.map((c) => c.header),
       rows.map((r) => EXPORT_COLUMNS.map((c) => c.get(r))),
     );
-    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Mellow inquiries backup</title><style>body{font:14px system-ui;margin:2rem}table{border-collapse:collapse}th,td{border:1px solid #ddd;padding:.5rem;vertical-align:top}th{background:#eee}td{white-space:pre-wrap}</style><h1>Inquiries backup</h1><p>${rows.length} submissions</p><table><thead><tr>${EXPORT_COLUMNS.map((c) => `<th>${escapeHtml(c.header)}</th>`).join("")}<th>Documents</th></tr></thead><tbody>${rows.map((row) => `<tr>${EXPORT_COLUMNS.map((c) => `<td>${escapeHtml(c.get(row))}</td>`).join("")}<td>${(imagePaths.get(row.id) ?? []).map((path) => `<a href="${escapeHtml(path)}">${escapeHtml(path.split("/").at(-1))}</a>`).join("<br>")}</td></tr>`).join("")}</tbody></table></html>`;
+    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Mellow inquiries backup</title><style>body{font:14px system-ui;margin:2rem}table{border-collapse:collapse}th,td{border:1px solid #ddd;padding:.5rem;vertical-align:top}th{background:#eee}td{white-space:pre-wrap}</style><h1>Inquiries backup</h1><p>${rows.length} submissions</p><table><thead><tr>${EXPORT_COLUMNS.map((c) => `<th>${escapeHtml(c.header)}</th>`).join("")}<th>Documents</th></tr></thead><tbody>${rows.map((row) => `<tr>${EXPORT_COLUMNS.map((c) => `<td>${escapeHtml(c.get(row))}</td>`).join("")}<td>${(imagePaths.get(row.id) ?? []).map((path) => `<a href="${escapeHtml(path.split("/").map(encodeURIComponent).join("/"))}">${escapeHtml(path.split("/").at(-1))}</a>`).join("<br>")}</td></tr>`).join("")}</tbody></table></html>`;
     async function* entries(): AsyncGenerator<ZipEntry> {
       yield { name: "inquiries.csv", body: new TextEncoder().encode(`\ufeff${csv}`) };
       yield { name: "inquiries.html", body: new TextEncoder().encode(html) };
-      for (const image of imageRows) {
-        const name = `images/${image.key.replace(/^submissions\//, "")}`;
+      for (const image of documents) {
+        const name = image.name;
         const object = await env.BUCKET.get(image.key);
         if (object?.body) yield { name, body: object.body };
         else

@@ -74,6 +74,7 @@ import {
   MERGE_TAGS,
   normalizeEmailBranding,
   normalizeHexColor,
+  summaryColorError,
   BRAND_COLOR_KEYS,
   newBlock,
   reorderEmailBlocks,
@@ -286,6 +287,8 @@ export async function action({ request }: Route.ActionArgs) {
       if (!isTemplateKey(key)) return { ok: false, message: "Unknown template." };
       const content = parseContent(form);
       if (!content.subject.trim()) return { ok: false, message: "Subject can't be empty." };
+      const colorError = summaryColorError(content.blocks);
+      if (colorError) return { ok: false, message: colorError };
       await saveTemplate(env.DB, key, content, session.email, eventId);
       return { ok: true, message: `Saved “${TEMPLATE_META[key].label}”.` };
     }
@@ -295,6 +298,8 @@ export async function action({ request }: Route.ActionArgs) {
       if (!isTemplateKey(key)) return { ok: false, message: "Unknown template." };
       const content = parseContent(form);
       if (!content.subject.trim()) return { ok: false, message: "Subject can't be empty." };
+      const colorError = summaryColorError(content.blocks);
+      if (colorError) return { ok: false, message: colorError };
       const rawBranding = JSON.parse(
         String(form.get("branding") ?? "null"),
       ) as EmailBranding | null;
@@ -310,6 +315,7 @@ export async function action({ request }: Route.ActionArgs) {
         return { ok: false, message: "Enter a valid contact email address." };
       }
       for (const key of BRAND_COLOR_KEYS) {
+        if (key === "heroTextColor" && rawBranding[key] === "") continue;
         if (typeof rawBranding[key] !== "string" || !normalizeHexColor(rawBranding[key])) {
           return { ok: false, message: `Invalid ${key} color. Use a hex color such as #2C2422.` };
         }
@@ -1418,6 +1424,7 @@ function TemplateEditor({
                   </div>
                   <BlockInspector
                     block={selectedBlock}
+                    branding={branding}
                     onRemove={() => setPendingAction({ type: "remove", block: selectedBlock })}
                     onChange={(patch) => updateBlock(selectedBlock.id, patch)}
                   />
@@ -1577,10 +1584,12 @@ function TemplateEditor({
 
 function BlockInspector({
   block,
+  branding,
   onRemove,
   onChange,
 }: {
   block: EmailBlock;
+  branding: EmailBranding;
   onRemove: () => void;
   onChange: (patch: Record<string, unknown>) => void;
 }) {
@@ -1603,7 +1612,7 @@ function BlockInspector({
         </Button>
       </div>
       <div className="grid gap-4">
-        <BlockFields block={block} onChange={onChange} />
+        <BlockFields block={block} branding={branding} onChange={onChange} />
         {block.type !== "spacer" && block.type !== "divider" && (
           <div className="grid gap-1.5">
             <Label className="text-xs text-muted-foreground">
@@ -1717,11 +1726,48 @@ function EmailImageInput({
   );
 }
 
+function SummaryColorField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field label={label}>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <input
+          type="color"
+          aria-label={`Summary ${label} picker`}
+          value={normalizeHexColor(value) ?? "#000000"}
+          onChange={(event) => onChange(event.target.value)}
+          className="size-9 shrink-0 cursor-pointer rounded border bg-background p-1"
+        />
+        <Input
+          aria-label={`Summary ${label} hex`}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={() => {
+            const normalized = normalizeHexColor(value);
+            if (normalized) onChange(normalized);
+          }}
+          aria-invalid={!normalizeHexColor(value)}
+          className="min-w-0 flex-1 font-mono text-xs"
+        />
+      </div>
+    </Field>
+  );
+}
+
 function BlockFields({
   block,
+  branding,
   onChange,
 }: {
   block: EmailBlock;
+  branding: EmailBranding;
   onChange: (patch: Record<string, unknown>) => void;
 }) {
   switch (block.type) {
@@ -1836,6 +1882,21 @@ function BlockFields({
     case "summary":
       return (
         <>
+          <div className="grid grid-cols-2 gap-3">
+            <SummaryColorField
+              label="Background color"
+              value={block.backgroundColor ?? branding.summaryBg}
+              onChange={(value) => onChange({ backgroundColor: value })}
+            />
+            <SummaryColorField
+              label="Text color"
+              value={block.textColor ?? branding.summaryTextColor}
+              onChange={(value) => onChange({ textColor: value })}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            These colors apply only to this summary box.
+          </p>
           <Field label="Section label">
             <Input
               value={block.label ?? ""}
@@ -2007,10 +2068,7 @@ function BrandingEditor({
   onChange: (b: EmailBranding) => void;
 }) {
   const set = (patch: Partial<EmailBranding>) => onChange({ ...branding, ...patch });
-  const colorField = (
-    key: "brandColor" | "accentColor" | "buttonColor" | "headerBg" | "footerBg",
-    label: string,
-  ) => (
+  const colorField = (key: (typeof BRAND_COLOR_KEYS)[number], label: string) => (
     <Field label={label}>
       <div className="flex min-w-0 items-center gap-1.5">
         <input
@@ -2101,8 +2159,9 @@ function BrandingEditor({
       )}
       <BrandSection title="Colors" />
       <p className="text-xs text-muted-foreground">
-        Use #RGB or #RRGGBB. Text contrast adjusts automatically. Invalid colors must be corrected
-        before publishing.
+        Use #RGB or #RRGGBB. Choose readable text/background pairs. Hero text uses automatic
+        contrast unless a custom color is enabled. Invalid colors must be corrected before
+        publishing.
       </p>
       <div className="grid grid-cols-2 gap-3">
         {colorField("brandColor", "Brand / hero")}
@@ -2110,7 +2169,17 @@ function BrandingEditor({
         {colorField("buttonColor", "Button")}
         {colorField("headerBg", "Header background")}
         {colorField("footerBg", "Footer background")}
+        {colorField("bodyBg", "Body background")}
+        {colorField("bodyTextColor", "Body text")}
       </div>
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={Boolean(branding.heroTextColor)}
+          onCheckedChange={(checked) => set({ heroTextColor: checked ? "#FFFFFF" : "" })}
+        />
+        Use a custom hero text color
+      </label>
+      {branding.heroTextColor && colorField("heroTextColor", "Hero text")}
       <BrandSection title="Footer & links" />
       <BrandLogoInput
         label="Footer logo"

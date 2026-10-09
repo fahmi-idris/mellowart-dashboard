@@ -115,6 +115,8 @@ export interface ButtonBlock extends BlockBase {
 }
 export interface SummaryBlock extends BlockBase {
   type: "summary";
+  backgroundColor?: string;
+  textColor?: string;
   label?: string;
   rows: { label: string; value: string }[];
 }
@@ -215,6 +217,11 @@ export interface EmailBranding {
   accentColor: string; // pill / highlight
   buttonColor: string;
   headerBg: string;
+  bodyBg: string;
+  bodyTextColor: string;
+  heroTextColor: string; // empty = automatic contrast
+  summaryBg: string;
+  summaryTextColor: string;
   footerBg: string; // footer background (falls back to brandColor)
   footerLogoUrl: string; // footer logo — use a light/inverted variant (falls back to logoUrl)
   footerText: string;
@@ -241,6 +248,11 @@ export const DEFAULT_BRANDING: EmailBranding = {
   accentColor: "#F2C4CE",
   buttonColor: "#2C2422",
   headerBg: "#FFFDF2",
+  bodyBg: "#F5F5F0",
+  bodyTextColor: "#2C2422",
+  heroTextColor: "",
+  summaryBg: "#FFFDF2",
+  summaryTextColor: "#2C2422",
   footerBg: "#2C2422",
   footerLogoUrl:
     "https://cdn.prod.website-files.com/6a223b24e44ab35ad710d94d/6a223b24e44ab35ad710d9a3_image%2030.webp",
@@ -265,6 +277,11 @@ export const BRAND_COLOR_KEYS = [
   "buttonColor",
   "headerBg",
   "footerBg",
+  "bodyBg",
+  "bodyTextColor",
+  "heroTextColor",
+  "summaryBg",
+  "summaryTextColor",
 ] as const;
 
 /** HTML color inputs require six digits; also accept shorthand in the text field. */
@@ -279,6 +296,21 @@ export function normalizeHexColor(value: string): string | null {
         .join("")
         .toUpperCase()
     );
+  return null;
+}
+
+export function summaryColorError(blocks: EmailBlock[]): string | null {
+  for (const block of blocks) {
+    if (block.type !== "summary") continue;
+    for (const key of ["backgroundColor", "textColor"] as const) {
+      if (
+        block[key] !== undefined &&
+        (typeof block[key] !== "string" || !normalizeHexColor(block[key]))
+      ) {
+        return `Invalid summary ${key === "backgroundColor" ? "background" : "text"} color. Use #RGB or #RRGGBB.`;
+      }
+    }
+  }
   return null;
 }
 
@@ -364,6 +396,7 @@ export const ALL_MERGE_TAGS: MergeTag[] = [
   ...COMMON_TAGS,
   { tag: "eventName", label: "Event name", sample: "Mellow Art Market — Spring" },
   { tag: "stallType", label: "Stall type (1st preference)", sample: "Standard – Debut" },
+  { tag: "offeredStall", label: "Offered / assigned stall", sample: "Standard – Debut" },
   { tag: "secondStallType", label: "Stall type (2nd preference)", sample: "Mini" },
   { tag: "invoiceUrl", label: "Invoice / pay link", sample: "https://pay.example.com/inv/123" },
   { tag: "amount", label: "Amount (formatted)", sample: "AUD 220.00" },
@@ -428,6 +461,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
         label: "Invoice Summary",
         rows: [
           { label: "Event", value: "{{eventName}}" },
+          { label: "Offered Stall", value: "{{offeredStall}}" },
           { label: "Submission ID", value: "{{reference}}" },
           { label: "Payment Due", value: "{{dueDate}}" },
           { label: "Total Amount", value: "{{amount}}" },

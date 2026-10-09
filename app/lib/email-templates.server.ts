@@ -12,6 +12,7 @@ import {
   DEFAULT_BRANDING,
   DEFAULT_TEMPLATES,
   normalizeEmailBranding,
+  normalizeHexColor,
   emailForeground,
   type EmailBlock,
   type EmailBranding,
@@ -71,20 +72,22 @@ function renderSummary(
   br: EmailBranding,
   ctx: Record<string, string>,
 ): string {
+  const background = normalizeHexColor(block.backgroundColor ?? "") ?? br.summaryBg;
+  const textColor = normalizeHexColor(block.textColor ?? "") ?? br.summaryTextColor;
   const label = (block.label ?? "").trim()
-    ? `<div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#BEB5B2;margin-bottom:12px">${interpolateHtml(block.label!, ctx)}</div>`
+    ? `<div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${br.bodyTextColor};margin-bottom:12px">${interpolateHtml(block.label!, ctx)}</div>`
     : "";
   const rows = block.rows
     .map((r, i) => {
       const last = i === block.rows.length - 1;
       const border = last ? "" : "border-bottom:1px solid #F0EBE3;";
       if (!r.label.trim()) {
-        return `<tr><td colspan="2" style="padding:8px 0;font-size:14px;color:#2C2422;line-height:1.6;white-space:pre-wrap;${border}">${interpolateHtml(r.value, ctx)}</td></tr>`;
+        return `<tr><td colspan="2" style="padding:8px 0;font-size:14px;color:${textColor};line-height:1.6;white-space:pre-wrap;${border}">${interpolateHtml(r.value, ctx)}</td></tr>`;
       }
-      return `<tr><td style="padding:8px 0;font-size:14px;color:#7A6E6C;vertical-align:top;${border}">${interpolateHtml(r.label, ctx)}</td><td style="padding:8px 0 8px 16px;font-size:14px;font-weight:500;color:#2C2422;text-align:right;vertical-align:top;${border}">${interpolateHtml(r.value, ctx)}</td></tr>`;
+      return `<tr><td style="padding:8px 0;font-size:14px;color:${textColor};vertical-align:top;${border}">${interpolateHtml(r.label, ctx)}</td><td style="padding:8px 0 8px 16px;font-size:14px;font-weight:500;color:${textColor};text-align:right;vertical-align:top;${border}">${interpolateHtml(r.value, ctx)}</td></tr>`;
     })
     .join("");
-  return `<div style="${PAD}">${label}<div style="background:${br.headerBg};border:1.5px solid #F0EBE3;border-radius:12px;padding:8px 20px"><table style="width:100%;border-collapse:collapse">${rows}</table></div></div>`;
+  return `<div style="${PAD}">${label}<div style="background:${background};border:1.5px solid #F0EBE3;border-radius:12px;padding:8px 20px"><table style="width:100%;border-collapse:collapse">${rows}</table></div></div>`;
 }
 
 function renderBank(br: EmailBranding, ctx: Record<string, string>): string {
@@ -94,7 +97,7 @@ function renderBank(br: EmailBranding, ctx: Record<string, string>): string {
     : escapeHtml("Mellow Art Market");
   const contact = ctx.contactEmail || br.contactEmail;
   const confirmRow = ctx.confirmationFormUrl?.trim()
-    ? `<div style="font-size:13px;color:#2C2422;margin-top:10px">📋 Or fill in our confirmation form: <a href="${escapeHtml(ctx.confirmationFormUrl)}" style="color:#2C2422">${val("confirmationFormUrl")}</a></div>`
+    ? `<div style="font-size:13px;color:${br.bodyTextColor};margin-top:10px">📋 Or fill in our confirmation form: <a href="${escapeHtml(ctx.confirmationFormUrl)}" style="color:${br.bodyTextColor}">${val("confirmationFormUrl")}</a></div>`
     : "";
   const rows = [
     ["Account Name", acctName],
@@ -105,14 +108,14 @@ function renderBank(br: EmailBranding, ctx: Record<string, string>): string {
   ]
     .map(
       ([l, v], i, a) =>
-        `<tr><td style="padding:9px 0;color:#7A6E6C;width:44%;${i === a.length - 1 ? "" : "border-bottom:1px solid #F0EBE3"}">${l}</td><td style="padding:9px 0;font-weight:500;color:#2C2422;${i === a.length - 1 ? "" : "border-bottom:1px solid #F0EBE3"}">${v}</td></tr>`,
+        `<tr><td style="padding:9px 0;color:${br.bodyTextColor};width:44%;${i === a.length - 1 ? "" : "border-bottom:1px solid #F0EBE3"}">${l}</td><td style="padding:9px 0;font-weight:500;color:${br.bodyTextColor};${i === a.length - 1 ? "" : "border-bottom:1px solid #F0EBE3"}">${v}</td></tr>`,
     )
     .join("");
   return `<div style="${PAD}"><div style="border:1.5px solid #F0EBE3;border-radius:12px;padding:20px">
-    <div style="font-size:13px;font-weight:600;color:#2C2422;margin-bottom:12px">Pay via Bank Transfer (EFT)</div>
+    <div style="font-size:13px;font-weight:600;color:${br.bodyTextColor};margin-bottom:12px">Pay via Bank Transfer (EFT)</div>
     <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">${rows}</table>
     <div style="background:#FFF8E1;border-left:3px solid ${br.accentColor};border-radius:0 8px 8px 0;padding:12px 16px;font-size:12px;color:#7A6E6C;line-height:1.6;margin-bottom:12px">⚠️ Please use your <strong style="color:#2C2422">Submission ID and full name</strong> as the payment reference so we can match your payment correctly.</div>
-    <div style="font-size:13px;color:#2C2422">📧 After transferring, confirm by emailing <a href="mailto:${escapeHtml(contact)}" style="color:#2C2422">${escapeHtml(contact)}</a></div>${confirmRow}
+    <div style="font-size:13px;color:${br.bodyTextColor}">📧 After transferring, confirm by emailing <a href="mailto:${escapeHtml(contact)}" style="color:${br.bodyTextColor}">${escapeHtml(contact)}</a></div>${confirmRow}
   </div></div>`;
 }
 
@@ -120,7 +123,7 @@ function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, s
   if (isHidden(block, ctx)) return "";
   switch (block.type) {
     case "hero": {
-      const foreground = emailForeground(br.brandColor);
+      const foreground = br.heroTextColor || emailForeground(br.brandColor);
       const tag = (block.tag ?? "").trim()
         ? `<div style="display:inline-block;background:${br.accentColor};color:${emailForeground(br.accentColor)};font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:6px 16px;border-radius:999px;margin-bottom:20px">${interpolateHtml(block.tag!, ctx)}</div>`
         : "";
@@ -146,15 +149,15 @@ function renderBlock(block: EmailBlock, br: EmailBranding, ctx: Record<string, s
       return `<div style="padding:20px 40px;text-align:center">${linked}</div>`;
     }
     case "heading":
-      return `<div style="padding:22px 40px 0"><h2 style="margin:0;font-size:18px;font-weight:600;color:#2C2422">${interpolateHtml(block.text, ctx)}</h2></div>`;
+      return `<div style="padding:22px 40px 0"><h2 style="margin:0;font-size:18px;font-weight:600;color:${br.bodyTextColor}">${interpolateHtml(block.text, ctx)}</h2></div>`;
     case "paragraph":
-      return `<div style="${PAD}"><p style="margin:0;font-size:15px;line-height:1.7;color:#2C2422">${interpolateHtml(block.text, ctx)}</p></div>`;
+      return `<div style="${PAD}"><p style="margin:0;font-size:15px;line-height:1.7;color:${br.bodyTextColor}">${interpolateHtml(block.text, ctx)}</p></div>`;
     case "list": {
       const tag = block.ordered ? "ol" : "ul";
       const items = block.items
         .map((i) => `<li style="margin-bottom:4px">${interpolateHtml(i, ctx)}</li>`)
         .join("");
-      return `<div style="${PAD}"><${tag} style="margin:0;padding-left:20px;color:#444;line-height:1.7;font-size:14px">${items}</${tag}></div>`;
+      return `<div style="${PAD}"><${tag} style="margin:0;padding-left:20px;color:${br.bodyTextColor};line-height:1.7;font-size:14px">${items}</${tag}></div>`;
     }
     case "button": {
       const url = escapeHtml(interpolateRaw(block.url, ctx));
@@ -205,12 +208,12 @@ function shell(bodyHtml: string, br: EmailBranding, preview = false): string {
     ? `<img src="${escapeHtml(footerLogo)}" alt="${escapeHtml(br.fromName)}" style="height:32px;width:auto;margin-bottom:14px;opacity:.9"/>`
     : "";
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
-<body style="margin:0;background:#F5F5F0;font-family:'Helvetica Neue',Arial,sans-serif;color:#2C2422;">
+<body style="margin:0;background:${br.bodyBg};font-family:'Helvetica Neue',Arial,sans-serif;color:${br.bodyTextColor};">
   <div style="max-width:720px;margin:0 auto;">
     <div${preview ? ' data-email-branding="Header"' : ""} style="background:${br.headerBg};padding:28px 40px;text-align:center;border-bottom:1px solid #F0EBE3">
       ${headerImage}
     </div>
-    <div style="padding:0 0 28px">${bodyHtml}</div>
+    <div style="background:${br.bodyBg};color:${br.bodyTextColor};padding:0 0 28px">${bodyHtml}</div>
     <div${preview ? ' data-email-branding="Footer"' : ""} style="background:${footerBg};padding:28px 40px;text-align:center">
       ${footerImage}
       <div style="margin:12px 0">${social}</div>
@@ -275,11 +278,31 @@ export async function getTemplate(
     try {
       const blocks = JSON.parse(row.blocks) as unknown;
       if (!Array.isArray(blocks)) return null;
-      return {
+      const content: TemplateContent = {
         subject: row.subject,
         preheader: row.preheader ?? "",
         blocks: blocks as EmailBlock[],
       };
+      // Upgrade existing invoice summaries without replacing customized copy.
+      if (key === "approval") {
+        content.blocks = content.blocks.map((block) => {
+          if (
+            block.type !== "summary" ||
+            !block.rows.some((r) => /\{\{\s*amount\s*\}\}/.test(r.value)) ||
+            block.rows.some((r) => /\{\{\s*offeredStall\s*\}\}/.test(r.value))
+          )
+            return block;
+          return {
+            ...block,
+            rows: [
+              block.rows[0],
+              { label: "Offered Stall", value: "{{offeredStall}}" },
+              ...block.rows.slice(1),
+            ],
+          };
+        });
+      }
+      return content;
     } catch {
       return null;
     }
@@ -382,6 +405,9 @@ export async function getBranding(db: D1Database, eventId?: string | null): Prom
       `SELECT from_name AS fromName, logo_url AS logoUrl, brand_color AS brandColor,
               accent_color AS accentColor, button_color AS buttonColor,
               header_bg AS headerBg, footer_bg AS footerBg,
+              body_bg AS bodyBg, body_text_color AS bodyTextColor,
+              hero_text_color AS heroTextColor, summary_bg AS summaryBg,
+              summary_text_color AS summaryTextColor,
               footer_logo_url AS footerLogoUrl, footer_text AS footerText,
               contact_email AS contactEmail, website_url AS websiteUrl,
               instagram_url AS instagramUrl, facebook_url AS facebookUrl,
@@ -413,8 +439,9 @@ export async function updateBranding(
       `INSERT INTO email_branding
          (id, from_name, logo_url, brand_color, accent_color, button_color,
           header_bg, footer_bg, footer_logo_url, footer_text, contact_email,
-          website_url, instagram_url, facebook_url, tiktok_url, updated_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          website_url, instagram_url, facebook_url, tiktok_url,
+          body_bg, body_text_color, hero_text_color, summary_bg, summary_text_color, updated_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(id) DO UPDATE SET
          from_name = excluded.from_name, logo_url = excluded.logo_url,
          brand_color = excluded.brand_color, accent_color = excluded.accent_color,
@@ -423,6 +450,9 @@ export async function updateBranding(
          footer_text = excluded.footer_text, contact_email = excluded.contact_email,
          website_url = excluded.website_url, instagram_url = excluded.instagram_url,
          facebook_url = excluded.facebook_url, tiktok_url = excluded.tiktok_url,
+         body_bg = excluded.body_bg, body_text_color = excluded.body_text_color,
+         hero_text_color = excluded.hero_text_color, summary_bg = excluded.summary_bg,
+         summary_text_color = excluded.summary_text_color,
          updated_at = datetime('now')`,
     )
     .bind(
@@ -440,6 +470,11 @@ export async function updateBranding(
       br.instagramUrl,
       br.facebookUrl,
       br.tiktokUrl,
+      br.bodyBg,
+      br.bodyTextColor,
+      br.heroTextColor,
+      br.summaryBg,
+      br.summaryTextColor,
     )
     .run();
 }

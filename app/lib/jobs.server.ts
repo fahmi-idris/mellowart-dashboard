@@ -105,6 +105,7 @@ export async function createInvoiceForSubmission(env: Env, submissionId: string)
           email: row.email,
           reference: row.id,
           eventName: row.event_name ?? "",
+          offeredStall: row.stall_tier ?? "",
           invoiceUrl: created.onlineUrl,
           amount: money(created.total ?? unitAmount, invCurrency),
           dueDate: formatDueDate(settings.dueDays),

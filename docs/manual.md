@@ -204,12 +204,33 @@ filename; all-event backups use `all-events` in the filename. The API requires
 `format=backup&filter.event_id=EVENT_ID` for one event and rejects missing/unknown
 events. Use `format=backup&scope=all` explicitly for all events.
 
+Each applicant's documents use a `REFERENCE - Brand Name` folder in the ZIP.
+Portfolio files are named `Portfolio Brand Name.pdf` (or the original extension),
+and certificates are named `Insurance Brand Name.pdf`. Additional documents use
+`(2)`, `(3)`, etc. to avoid overwrites. Buddy portfolios use the buddy's brand name
+inside the main applicant's folder. Unsafe filename characters are replaced;
+missing brand names fall back to `Applicant`. R2 originals are not renamed.
+
 ### Email branding
 
-Brand colors accept #RGB or #RRGGBB; invalid colors cannot be published. Hero,
-pill, solid-button, header and footer text contrast adjusts to their background.
+Brand colors accept #RGB or #RRGGBB; invalid colors cannot be published.
+**Body background** and **Body text** control the general email content.
+Click a **Summary box**, then use **Block → Background color / Text color**.
+These settings are saved per block, independent of the header and other summaries.
+Older blocks without their own colors retain the existing summary brand colors as a
+fallback; the summary controls have been removed from **Brand style**.
+Hero text uses automatic contrast unless **Use a custom hero text color** is enabled;
+this controls both its heading and subtext. Pill, solid-button, header and footer
+text contrast adjusts to their background. Choose readable pairs for custom colors.
 Brand changes remain event-scoped and are saved with **Publish changes**.
 The footer contact email is rendered as a clickable `mailto:` link.
+Invoice summaries include **Offered Stall** (`{{offeredStall}}`), populated from the
+assigned stall that sets the invoice price, not the applicant's first preference.
+Existing approval summaries containing `{{amount}}` gain this row when loaded,
+while preserving customized text and other rows. Apply migration
+`0023_email_body_summary_colors.sql` before deploying this change; event branding
+uses JSON while the global fallback uses the new columns. Old event JSON receives
+default body/summary colors automatically.
 
 ---
 
