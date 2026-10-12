@@ -213,6 +213,13 @@ missing brand names fall back to `Applicant`. R2 originals are not renamed.
 
 ### Email branding
 
+**Send test** opens a recipient dialog. Enter one inbox address, then choose
+**Send test email**. The draft is sent with sample applicant data to that address
+from the connected Gmail account; it does not publish the template or change a
+submission. Both the editor toolbar and review dialog use this same recipient
+dialog. The recipient is required and validated on the server. Successful sends
+close the dialog; failures keep it open for correction or retry.
+
 Brand colors accept #RGB or #RRGGBB; invalid colors cannot be published.
 **Body background** and **Body text** control the general email content.
 Click a **Summary box**, then use **Block → Background color / Text color**.

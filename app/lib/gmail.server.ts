@@ -10,6 +10,7 @@
  */
 
 import { getGoogleTokens, saveGoogleTokens, type GoogleTokenRow } from "~/lib/google-tokens.server";
+import { testEmailRecipient } from "~/lib/test-email-recipient";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -150,12 +151,14 @@ export async function sendEmail(env: Env, msg: OutgoingEmail): Promise<void> {
   await sendFromMailbox(token, email, msg);
 }
 
-/** Send a template test to the same mailbox used to authenticate the sender. */
-export async function sendTestEmail(env: Env, msg: Omit<OutgoingEmail, "to">): Promise<string> {
+/** Send a template test to the explicitly chosen inbox, from the connected mailbox. */
+export async function sendTestEmail(env: Env, msg: OutgoingEmail): Promise<string> {
+  const recipient = testEmailRecipient(msg.to);
+  if (!recipient) throw new Error("Enter a valid recipient email address.");
   const { token, email } = await getValidAccessToken(env);
   if (!email.trim()) throw new Error("Reconnect Gmail to identify the connected mailbox.");
-  await sendFromMailbox(token, email, { ...msg, to: email });
-  return email;
+  await sendFromMailbox(token, email, { ...msg, to: recipient });
+  return recipient;
 }
 
 async function sendFromMailbox(token: string, email: string, msg: OutgoingEmail): Promise<void> {

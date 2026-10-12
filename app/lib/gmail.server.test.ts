@@ -9,7 +9,7 @@ describe("template test recipient", () => {
     return { DB: { prepare: () => ({ first: async () => connection }) } } as unknown as Env;
   }
 
-  it("sends from and to the connected Gmail mailbox", async () => {
+  it("sends to the modal recipient while keeping the connected Gmail sender", async () => {
     const send = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", send);
     const recipient = await sendTestEmail(
@@ -19,21 +19,40 @@ describe("template test recipient", () => {
         expiresAt: Date.now() + 3600000,
         email: "connected@example.com",
       }),
-      { subject: "[TEST] Preview", html: "<p>Preview</p>" },
+      { to: " recipient@example.com ", subject: "[TEST] Preview", html: "<p>Preview</p>" },
     );
-    expect(recipient).toBe("connected@example.com");
+    expect(recipient).toBe("recipient@example.com");
     const payload = JSON.parse(send.mock.calls[0][1].body);
     const mime = Buffer.from(payload.raw, "base64url").toString("utf8");
     expect(mime).toContain("From: connected@example.com\r\n");
-    expect(mime).toContain("To: connected@example.com\r\n");
+    expect(mime).toContain("To: recipient@example.com\r\n");
+    expect(mime).not.toContain("To: connected@example.com\r\n");
   });
 
   it("does not send when Gmail is disconnected", async () => {
     const send = vi.fn();
     vi.stubGlobal("fetch", send);
     await expect(
-      sendTestEmail(testEnv(null), { subject: "Test", html: "Preview" }),
+      sendTestEmail(testEnv(null), {
+        to: "recipient@example.com",
+        subject: "Test",
+        html: "Preview",
+      }),
     ).rejects.toThrow("Gmail is not connected");
+    expect(send).not.toHaveBeenCalled();
+  });
+  it.each([
+    "",
+    "not-an-email",
+    "one@example.com,two@example.com",
+    "one@example.com\r\nBcc: other@example.com",
+    "one@example.com\n",
+  ])("rejects invalid recipients before contacting Gmail: %s", async (to) => {
+    const send = vi.fn();
+    vi.stubGlobal("fetch", send);
+    await expect(
+      sendTestEmail(testEnv(null), { to, subject: "Test", html: "Preview" }),
+    ).rejects.toThrow("valid recipient");
     expect(send).not.toHaveBeenCalled();
   });
 });

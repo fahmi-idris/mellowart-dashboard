@@ -65,6 +65,7 @@ import { Textarea } from "~/components/ui/textarea";
 import { requireAdmin } from "~/lib/auth.server";
 import { uploadEmailAsset } from "~/lib/email-assets.server";
 import { sendTestEmail } from "~/lib/gmail.server";
+import { testEmailRecipient } from "~/lib/test-email-recipient";
 import {
   BLOCK_LABELS,
   type BlockType,
@@ -326,6 +327,8 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     if (intent === "send_test") {
+      const to = testEmailRecipient(String(form.get("recipient") ?? ""));
+      if (!to) return { ok: false, message: "Enter a valid recipient email address." };
       const key = String(form.get("key") ?? "");
       if (!isTemplateKey(key)) return { ok: false, message: "Unknown template." };
       const content = parseContent(form);
@@ -335,6 +338,7 @@ export async function action({ request }: Route.ActionArgs) {
         : await getBranding(env.DB, eventId);
       const rendered = renderContent(content, branding, await previewContext(key, event.name));
       const recipient = await sendTestEmail(env, {
+        to,
         subject: `[TEST] ${rendered.subject}`,
         html: rendered.html,
         fromName: branding.fromName,
@@ -619,6 +623,11 @@ function TemplateEditor({
   const previewFetcher = useFetcher<ActionData>();
   const saveFetcher = useFetcher<ActionData>();
   const testFetcher = useFetcher<ActionData>();
+  const [testOpen, setTestOpen] = useState(false);
+  const [testRecipient, setTestRecipient] = useState("");
+  const [testError, setTestError] = useState<string | null>(null);
+  const testPending = useRef(false);
+  const handledTestResult = useRef<ActionData | undefined>(undefined);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(
     () => content.blocks[0]?.id ?? null,
   );
@@ -906,7 +915,16 @@ function TemplateEditor({
 
   useEffect(() => {
     const d = testFetcher.data;
-    if (d && testFetcher.state === "idle") d.ok ? toast.success(d.message) : toast.error(d.message);
+    if (!d || testFetcher.state !== "idle" || handledTestResult.current === d) return;
+    handledTestResult.current = d;
+    testPending.current = false;
+    if (d.ok) {
+      setTestOpen(false);
+      toast.success(d.message);
+    } else {
+      setTestError(d.message ?? "Could not send the test email.");
+      toast.error(d.message);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testFetcher.data, testFetcher.state]);
 
@@ -998,6 +1016,23 @@ function TemplateEditor({
     saveFetcher.submit(submitPayload("publish_template"), { method: "post" });
   };
 
+  const openTestEmail = () => {
+    setTestError(null);
+    setTestOpen(true);
+  };
+
+  const sendTemplateTest = () => {
+    if (testPending.current || testFetcher.state !== "idle") return;
+    const recipient = testEmailRecipient(testRecipient);
+    if (!recipient) {
+      setTestError("Enter a valid recipient email address.");
+      return;
+    }
+    testPending.current = true;
+    setTestError(null);
+    testFetcher.submit({ ...submitPayload("send_test"), recipient }, { method: "post" });
+  };
+
   const confirmPendingAction = () => {
     if (!pendingAction) return;
 
@@ -1049,11 +1084,11 @@ function TemplateEditor({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => testFetcher.submit(submitPayload("send_test"), { method: "post" })}
+            onClick={openTestEmail}
             disabled={!gmail.connected || testFetcher.state !== "idle"}
             title={
               gmail.connected
-                ? `Send a sample to the connected Gmail account${gmail.email ? ` (${gmail.email})` : ""}`
+                ? "Choose an inbox to receive a sample email"
                 : gmail.configured
                   ? "Connect Gmail in Invoice settings to send tests"
                   : "Configure Google OAuth credentials and restart the local server"
@@ -1538,7 +1573,10 @@ function TemplateEditor({
             <Button
               variant="outline"
               disabled={!gmail.connected || testFetcher.state !== "idle"}
-              onClick={() => testFetcher.submit(submitPayload("send_test"), { method: "post" })}
+              onClick={() => {
+                setReviewOpen(false);
+                openTestEmail();
+              }}
             >
               Send test
             </Button>
@@ -1546,6 +1584,77 @@ function TemplateEditor({
               {saveFetcher.state !== "idle" ? "Publishing…" : "Publish changes"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={testOpen}
+        onOpenChange={(open) => {
+          if (!testPending.current) setTestOpen(open);
+        }}
+      >
+        <DialogContent
+          className="gap-0 overflow-hidden p-0 sm:max-w-[560px]"
+          showCloseButton={testFetcher.state === "idle"}
+        >
+          <DialogHeader className="border-b px-6 py-6">
+            <DialogTitle className="text-2xl">Send test email</DialogTitle>
+            <DialogDescription>Enter the inbox that should receive this test.</DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              sendTemplateTest();
+            }}
+          >
+            <div className="space-y-3 px-6 py-6">
+              <Label htmlFor="test-email-recipient">Recipient email</Label>
+              <Input
+                id="test-email-recipient"
+                type="email"
+                required
+                autoFocus
+                autoComplete="email"
+                placeholder="name@example.com"
+                value={testRecipient}
+                onChange={(event) => {
+                  setTestRecipient(event.target.value);
+                  setTestError(null);
+                }}
+                disabled={testFetcher.state !== "idle"}
+                aria-invalid={Boolean(testError)}
+                aria-describedby="test-email-help test-email-error"
+                className="h-11"
+              />
+              <p id="test-email-help" className="text-sm text-muted-foreground">
+                A real email with sample applicant data will be sent from{" "}
+                {gmail.email ?? "the connected Gmail account"}.
+              </p>
+              <p id="test-email-error" role="alert" className="text-sm text-destructive">
+                {testError}
+              </p>
+            </div>
+            <DialogFooter className="mx-0 mb-0 border-t px-6 py-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setTestOpen(false)}
+                disabled={testFetcher.state !== "idle"}
+              >
+                Back
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  !gmail.connected ||
+                  !testEmailRecipient(testRecipient) ||
+                  testFetcher.state !== "idle"
+                }
+              >
+                {testFetcher.state !== "idle" ? "Sending…" : "Send test email"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
