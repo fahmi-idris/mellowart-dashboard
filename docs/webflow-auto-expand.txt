@@ -1,0 +1,65 @@
+<script>
+(function () {
+  function initialize() {
+    const form = document.getElementById("wf-form-artist-application");
+    if (!form || form.dataset.autoExpandBound === "true") return;
+    form.dataset.autoExpandBound = "true";
+    const minimumHeights = new WeakMap();
+
+    function expand(textarea) {
+      // Hidden stall buddy fields are measured after becoming visible.
+      if (!textarea.getClientRects().length) return;
+      if (!minimumHeights.has(textarea)) {
+        minimumHeights.set(textarea, textarea.getBoundingClientRect().height);
+      }
+      textarea.style.setProperty("box-sizing", "border-box", "important");
+      textarea.style.setProperty("overflow-y", "hidden", "important");
+      textarea.style.setProperty("resize", "none", "important");
+      textarea.style.setProperty("max-height", "none", "important");
+      textarea.style.setProperty("field-sizing", "fixed", "important");
+      textarea.style.setProperty("height", "auto", "important");
+      const style = getComputedStyle(textarea);
+      const borders = (parseFloat(style.borderTopWidth) || 0) +
+        (parseFloat(style.borderBottomWidth) || 0);
+      textarea.style.setProperty("height", Math.ceil(Math.max(
+        minimumHeights.get(textarea), textarea.scrollHeight + borders
+      )) + "px", "important");
+    }
+
+    let frame;
+    function expandAll() {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(function () {
+        form.querySelectorAll("textarea").forEach(expand);
+      });
+    }
+    function expandTarget(event) {
+      if (event.target instanceof HTMLTextAreaElement) expand(event.target);
+    }
+    form.addEventListener("input", expandTarget, true);
+    form.addEventListener("focusin", expandTarget);
+    form.addEventListener("change", expandAll);
+    form.addEventListener("reset", expandAll);
+    window.addEventListener("resize", expandAll);
+    // Ignore our own textarea style writes to prevent observer resize loops.
+    new MutationObserver(function (mutations) {
+      if (mutations.some(function (mutation) {
+        return mutation.type === "childList" ||
+          !(mutation.target instanceof HTMLTextAreaElement);
+      })) expandAll();
+    }).observe(form, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["style", "class", "hidden"]
+    });
+    if (document.fonts?.ready) document.fonts.ready.then(expandAll);
+    expandAll();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize);
+  } else {
+    initialize();
+  }
+})();
+</script>

@@ -61,13 +61,14 @@ computer.
 
 After login you see summary cards:
 
-| Card | Meaning |
-| --- | --- |
-| **Total inquiries** | All submissions ever received. |
-| **Pending review** | Waiting for your decision. |
-| **Accepted** | Accepted applicants. |
-| **Waitlisted** | Applicants kept on hold. |
-| **Rejected** | Declined applicants. |
+| Card                | Meaning                                     |
+| ------------------- | ------------------------------------------- |
+| **Total inquiries** | All submissions ever received.              |
+| **Pending review**  | Waiting for your decision.                  |
+| **Accepted**        | Accepted applicants.                        |
+| **Waitlisted**      | Applicants kept on hold.                    |
+| **Rejected**        | Declined applicants.                        |
+| **Withdrawn**       | Applicants whose application was withdrawn. |
 
 Use the sidebar to move between **Dashboard**, **Inquiries**, **Events**, and
 **Invoice settings**.
@@ -84,28 +85,36 @@ Each row has two **independent** status controls, plus the stall and invoice:
 
 **Application status** (a dropdown you can change at any time):
 
-| Status | What it means |
-| --- | --- |
-| **Pending** | New — needs your decision. |
-| **Accepted** | You accepted it. Unlocks the stall picker. |
-| **Waitlisted** | On hold; no email sent. |
-| **Rejected** | Declined (sends the rejection email). |
+| Status         | What it means                                             |
+| -------------- | --------------------------------------------------------- |
+| **Pending**    | New — needs your decision.                                |
+| **Accepted**   | You accepted it. Unlocks the stall picker.                |
+| **Waitlisted** | On hold; email can be sent separately.                    |
+| **Rejected**   | Declined; email can be sent separately.                   |
+| **Withdrawn**  | Removed from consideration; email can be sent separately. |
 
 **Payment status** (separate from the decision above):
 
-| Status | What it means |
-| --- | --- |
-| **Not sent** | No invoice created yet. |
-| **Invoicing** | Invoice is being created in Xero. |
-| **Awaiting payment** | Invoice sent, not yet paid. |
-| **Paid** | Invoice paid. |
-| **Overdue** | Invoice past its due date. |
-| **Voided** | Invoice cancelled. |
+| Status               | What it means                     |
+| -------------------- | --------------------------------- |
+| **Not sent**         | No invoice created yet.           |
+| **Invoicing**        | Invoice is being created in Xero. |
+| **Awaiting payment** | Invoice sent, not yet paid.       |
+| **Paid**             | Invoice paid.                     |
+| **Overdue**          | Invoice past its due date.        |
+| **Voided**           | Invoice cancelled.                |
 
 Other columns: **Stall assigned** (dropdown, only active once Accepted),
-**Invoice** (the *Send invoice* button / link), and a **Notes** icon (see
+**Invoice** (the _Send invoice_ button / link), and a **Notes** icon (see
 below). You can **filter by Application status, Payment status, or Event** and
-search by name/email to focus your work.
+search by name/email to focus your work. **Advanced search** also offers reference,
+categories, Instagram, website, internal notes, prior applications, and second
+artist fields. Use **Columns** to show or hide optional table fields.
+
+**Copy emails** copies addresses matching the current filters. **Export CSV**
+downloads the filtered records. **Backup data** downloads a ZIP with CSV, HTML,
+and uploaded documents for a chosen event or all events, including archived
+submissions. The current event is preselected for the single-event option.
 
 ### Viewing details
 
@@ -136,20 +145,30 @@ before the invoice:
 > them.
 
 **Requirements for invoicing to fully work:**
+
 - **Xero must be connected** (otherwise the invoice can't be created).
 - **Gmail must be connected** for the email to send. If Gmail is disconnected,
   the invoice still happens — only the email is skipped.
 
-### Waitlisting / Rejecting
+### Waitlisting / Rejecting / Withdrawing
 
-- Set **Application status** to **Waitlisted** to keep an applicant on hold (no
-  email is sent).
-- Set it to **Rejected** and **type a reason** (required) — the reason is
-  included in the email sent to the artist. The rejection email is best-effort:
-  if Gmail is disconnected or fails, the rejection is still recorded.
+- Set **Application status** to **Waitlisted** or **Rejected** to record the
+  decision. You can optionally include a reason.
+- Set it to **Withdrawn** when the applicant withdraws.
+- The **Email** button beside these statuses opens a confirmation before sending
+  the matching editable template. A status change alone never sends that email.
 
 > You can change the Application status at any time via the dropdown. Re-setting
-> a row to **Rejected** re-sends the rejection email.
+> a row to **Rejected** does not re-send the rejection email.
+
+### Bulk actions and deletion
+
+Select rows using the checkboxes in the table. You can apply one application
+status to the selected rows; review the confirmation dialog before applying it.
+Bulk status changes do not send emails. **Delete** permanently removes the
+selected submissions, their local invoice records, activity, notes, and uploaded
+files after confirmation. Invoices already issued in Xero remain in Xero. Back
+up the data before deleting if you may need it later.
 
 ### Internal notes
 
@@ -169,6 +188,56 @@ reconcile it by hand:
    matching status: **Awaiting payment**, **Paid**, **Overdue**, or **Voided**.
 
 This keeps the dashboard badge in sync with reality.
+
+### Submission rows and backups
+
+Click any non-interactive cell in an artist submission row to open its profile;
+focused rows also open with Enter or Space. Checkboxes, links, status selectors
+and action buttons keep their own behavior.
+
+**Backup data** offers **One event** or **All events**. Single-event ZIPs contain
+only that event's submissions and documents. All-event ZIPs contain all submissions
+and documents, including unassigned records. Both include archived submissions.
+Search, status filters and pagination are ignored so the event backup is complete.
+The dialog shows the event's submission count. The event slug appears in the ZIP
+filename; all-event backups use `all-events` in the filename. The API requires
+`format=backup&filter.event_id=EVENT_ID` for one event and rejects missing/unknown
+events. Use `format=backup&scope=all` explicitly for all events.
+
+Each applicant's documents use a `REFERENCE - Brand Name` folder in the ZIP.
+Portfolio files are named `Portfolio Brand Name.pdf` (or the original extension),
+and certificates are named `Insurance Brand Name.pdf`. Additional documents use
+`(2)`, `(3)`, etc. to avoid overwrites. Buddy portfolios use the buddy's brand name
+inside the main applicant's folder. Unsafe filename characters are replaced;
+missing brand names fall back to `Applicant`. R2 originals are not renamed.
+
+### Email branding
+
+**Send test** opens a recipient dialog. Enter one inbox address, then choose
+**Send test email**. The draft is sent with sample applicant data to that address
+from the connected Gmail account; it does not publish the template or change a
+submission. Both the editor toolbar and review dialog use this same recipient
+dialog. The recipient is required and validated on the server. Successful sends
+close the dialog; failures keep it open for correction or retry.
+
+Brand colors accept #RGB or #RRGGBB; invalid colors cannot be published.
+**Body background** and **Body text** control the general email content.
+Click a **Summary box**, then use **Block → Background color / Text color**.
+These settings are saved per block, independent of the header and other summaries.
+Older blocks without their own colors retain the existing summary brand colors as a
+fallback; the summary controls have been removed from **Brand style**.
+Hero text uses automatic contrast unless **Use a custom hero text color** is enabled;
+this controls both its heading and subtext. Pill, solid-button, header and footer
+text contrast adjusts to their background. Choose readable pairs for custom colors.
+Brand changes remain event-scoped and are saved with **Publish changes**.
+The footer contact email is rendered as a clickable `mailto:` link.
+Invoice summaries include **Offered Stall** (`{{offeredStall}}`), populated from the
+assigned stall that sets the invoice price, not the applicant's first preference.
+Existing approval summaries containing `{{amount}}` gain this row when loaded,
+while preserving customized text and other rows. Apply migration
+`0023_email_body_summary_colors.sql` before deploying this change; event branding
+uses JSON while the global fallback uses the new columns. Old event JSON receives
+default body/summary colors automatically.
 
 ---
 
@@ -206,14 +275,14 @@ These defaults are applied to the single fee line on every generated invoice.
 Note there is **no price field here** — the price comes from the **stall**
 assigned to each applicant (configured per event under **Events**).
 
-| Field | What it is |
-| --- | --- |
-| **Item description** | Text shown on the invoice line (e.g. "Full table fee"). The assigned stall's tier name is appended automatically. |
-| **Currency** | 3-letter code, e.g. `AUD`, `USD`. Used only as a fallback if a stall has no currency. |
-| **Account code** | Your Xero account/ledger code the income posts to. |
-| **Due in (days)** | How many days from issue until the invoice is due. |
-| **Line amount types** | Whether the stall price is tax-inclusive, exclusive, or no-tax (matches Xero's options). |
-| **Tax type** | Xero tax code, chosen from a dropdown: **GST on Income (10%)**, **GST Free Income**, or **No GST**. |
+| Field                 | What it is                                                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Item description**  | Text shown on the invoice line (e.g. "Full table fee"). The assigned stall's tier name is appended automatically. |
+| **Currency**          | 3-letter code, e.g. `AUD`, `USD`. Used only as a fallback if a stall has no currency.                             |
+| **Account code**      | Your Xero account/ledger code the income posts to.                                                                |
+| **Due in (days)**     | How many days from issue until the invoice is due.                                                                |
+| **Line amount types** | Whether the stall price is tax-inclusive, exclusive, or no-tax (matches Xero's options).                          |
+| **Tax type**          | Xero tax code, chosen from a dropdown: **GST on Income (10%)**, **GST Free Income**, or **No GST**.               |
 
 Click **Save settings**. Changes apply to **future** invoices only — already-
 created invoices are not changed.
@@ -235,16 +304,16 @@ builds/maintains the form). As the admin, you only ever see the results in
 ## 7. Common questions
 
 **An artist says they didn't get the email.**
-Check **Invoice settings → Email (Gmail)** shows *Connected*. If it was
+Check **Invoice settings → Email (Gmail)** shows _Connected_. If it was
 disconnected at the time, the email was skipped — reconnect, then (for
 approvals) the invoice link is also visible in Xero so you can resend manually.
 
 **Invoice failed / no invoice was created.**
-Check **Invoice settings → Xero connection** shows *Connected*, that the row is
+Check **Invoice settings → Xero connection** shows _Connected_, that the row is
 **Accepted with a stall assigned**, then click **Send invoice** again.
 
 **The Send invoice button isn't showing.**
-A row must be **Accepted** *and* have a **stall assigned** first. If the stall
+A row must be **Accepted** _and_ have a **stall assigned** first. If the stall
 column says the event has no stalls, add them under **Events** for that event.
 
 **I set the wrong decision.**

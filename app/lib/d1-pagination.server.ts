@@ -16,6 +16,12 @@ export interface D1ListConfig {
   columns?: string;
   /** Columns matched with LIKE for the search box. */
   searchColumns?: string[];
+  /**
+   * Named search fields and their SQL expressions. Named fields are combined
+   * with OR; expressions within one field are also combined with OR.
+   * Keys and expressions must be developer-controlled.
+   */
+  searchFieldColumns?: Record<string, string[]>;
   /** Columns allowed as exact-match filters. */
   filterColumns?: string[];
   /** Columns allowed in ORDER BY (allowlist — prevents injection). */
@@ -45,10 +51,26 @@ export async function d1List<T>(
   // Search across configured columns: (a LIKE ? OR b LIKE ?)
   if (q.search && config.searchColumns?.length) {
     const like = `%${q.search}%`;
-    where.push(
-      "(" + config.searchColumns.map((c) => `${c} LIKE ?`).join(" OR ") + ")",
-    );
+    where.push("(" + config.searchColumns.map((c) => `${c} LIKE ?`).join(" OR ") + ")");
     for (const _ of config.searchColumns) args.push(like);
+  }
+
+  // Advanced search: ((name expressions) OR (brand expressions) OR ...).
+  // Unknown request keys are ignored because only config keys are used.
+  const namedSearchGroups: string[] = [];
+  if (q.searches && config.searchFieldColumns) {
+    for (const criterion of q.searches) {
+      const expressions = config.searchFieldColumns[criterion.field];
+      if (!criterion.value || !expressions?.length) continue;
+      namedSearchGroups.push(
+        "(" + expressions.map((expression) => `${expression} LIKE ?`).join(" OR ") + ")",
+      );
+      const like = `%${criterion.value}%`;
+      for (const _ of expressions) args.push(like);
+    }
+  }
+  if (namedSearchGroups.length) {
+    where.push("(" + namedSearchGroups.join(" OR ") + ")");
   }
 
   // Exact-match filters
@@ -68,12 +90,9 @@ export async function d1List<T>(
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
   // Sort: only honor an allowlisted field, else fall back to default.
-  const requested =
-    q.sort && config.sortColumns?.includes(q.sort.field) ? q.sort : null;
+  const requested = q.sort && config.sortColumns?.includes(q.sort.field) ? q.sort : null;
   const sort = requested ?? config.defaultSort ?? null;
-  const orderSql = sort
-    ? `ORDER BY ${sort.field} ${sort.dir === "desc" ? "DESC" : "ASC"}`
-    : "";
+  const orderSql = sort ? `ORDER BY ${sort.field} ${sort.dir === "desc" ? "DESC" : "ASC"}` : "";
 
   const pageSize = Math.max(1, q.pageSize);
   const page = Math.max(1, q.page);
@@ -81,9 +100,7 @@ export async function d1List<T>(
   const columns = config.columns ?? "*";
 
   const dataStmt = db
-    .prepare(
-      `SELECT ${columns} FROM ${config.table} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`,
-    )
+    .prepare(`SELECT ${columns} FROM ${config.table} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`)
     .bind(...args, pageSize, offset);
 
   const countStmt = db

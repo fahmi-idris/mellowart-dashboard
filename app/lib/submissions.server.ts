@@ -1,4 +1,5 @@
 import type { ArtistFields } from "~/lib/artist";
+import type { SearchCriterion } from "~/lib/data-table";
 
 export interface UploadFile {
   kind: "profile" | "portfolio" | "insurance" | "second_portfolio";
@@ -155,6 +156,8 @@ export interface SubmissionDetail {
   status: string;
   rejectReason: string | null;
   waitlistReason: string | null;
+  withdrawnReason: string | null;
+  decisionEmailSentAt: string | null;
   stallOptionId: string | null;
   stallTier: string | null;
   paymentStatus: string;
@@ -196,6 +199,8 @@ export async function getSubmissionDetail(
               s.event_id AS eventId, e.name AS eventName,
               s.status, s.reject_reason AS rejectReason,
               s.waitlist_reason AS waitlistReason,
+              s.withdrawn_reason AS withdrawnReason,
+              s.decision_email_sent_at AS decisionEmailSentAt,
               s.stall_option_id AS stallOptionId, o.tier AS stallTier,
               s.payment_status AS paymentStatus, s.created_at AS submittedAt,
               s.second_artist_first_name AS secondFirstName,
@@ -265,6 +270,8 @@ export interface SubmissionExportRow {
   status: string;
   rejectReason: string | null;
   waitlistReason: string | null;
+  withdrawnReason: string | null;
+  decisionEmailSentAt: string | null;
   decidedBy: string | null;
   decidedAt: string | null;
   stallOptionId: string | null;
@@ -292,6 +299,7 @@ export interface SubmissionExportRow {
 
 export interface SubmissionExportFilters {
   search?: string;
+  searches?: SearchCriterion[];
   status?: string;
   paymentStatus?: string;
   eventId?: string;
@@ -314,8 +322,49 @@ export async function getSubmissionsForExport(
 
   if (filters.search) {
     const like = `%${filters.search}%`;
-    where.push("(s.first_name LIKE ? OR s.last_name LIKE ? OR s.email LIKE ?)");
-    args.push(like, like, like);
+    where.push(
+      "(s.id LIKE ? OR s.first_name LIKE ? OR s.last_name LIKE ? OR (s.first_name || ' ' || s.last_name) LIKE ? OR s.email LIKE ? OR s.brand_name LIKE ? OR s.primary_category LIKE ? OR s.secondary_category LIKE ? OR s.internal_notes LIKE ?)",
+    );
+    args.push(...Array(9).fill(like));
+  }
+  const namedSearchGroups: string[] = [];
+  for (const criterion of filters.searches ?? []) {
+    const like = `%${criterion.value}%`;
+    if (criterion.field === "name" && criterion.value) {
+      namedSearchGroups.push(
+        "(s.first_name LIKE ? OR s.last_name LIKE ? OR (s.first_name || ' ' || s.last_name) LIKE ?)",
+      );
+      args.push(like, like, like);
+    } else if (criterion.field === "brand" && criterion.value) {
+      namedSearchGroups.push("s.brand_name LIKE ?");
+      args.push(like);
+    } else if (criterion.field === "email" && criterion.value) {
+      namedSearchGroups.push("s.email LIKE ?");
+      args.push(like);
+    } else if (criterion.field === "secondArtist" && criterion.value) {
+      namedSearchGroups.push(
+        "(s.second_artist_first_name LIKE ? OR s.second_artist_last_name LIKE ? OR s.second_artist_email LIKE ? OR s.second_artist_brand_name LIKE ?)",
+      );
+      args.push(like, like, like, like);
+    } else if (criterion.value) {
+      const fields: Record<string, string> = {
+        reference: "s.id",
+        primaryCategory: "s.primary_category",
+        secondaryCategory: "s.secondary_category",
+        instagram: "s.instagram",
+        website: "s.website",
+        notes: "s.internal_notes",
+        appliedBefore: "s.applied_before",
+      };
+      const column = fields[criterion.field];
+      if (column) {
+        namedSearchGroups.push(`${column} LIKE ?`);
+        args.push(like);
+      }
+    }
+  }
+  if (namedSearchGroups.length) {
+    where.push(`(${namedSearchGroups.join(" OR ")})`);
   }
   const exact: [string, string | undefined][] = [
     ["s.status", filters.status],
@@ -352,6 +401,8 @@ export async function getSubmissionsForExport(
               s.event_id AS eventId, e.name AS eventName,
               s.status, s.reject_reason AS rejectReason,
               s.waitlist_reason AS waitlistReason,
+              s.withdrawn_reason AS withdrawnReason,
+              s.decision_email_sent_at AS decisionEmailSentAt,
               s.decided_by AS decidedBy, s.decided_at AS decidedAt,
               s.stall_option_id AS stallOptionId, o.tier AS stallTier,
               s.payment_status AS paymentStatus, s.xero_invoice_id AS xeroInvoiceId,
@@ -390,11 +441,7 @@ export async function getSubmissionsForExport(
  * Archive (hide from the default inquiries list) or unarchive a submission.
  * Purely a visibility flag — leaves application/payment status untouched.
  */
-export async function setArchived(
-  db: D1Database,
-  id: string,
-  archived: boolean,
-): Promise<boolean> {
+export async function setArchived(db: D1Database, id: string, archived: boolean): Promise<boolean> {
   const res = await db
     .prepare(
       `UPDATE submissions
@@ -422,4 +469,34 @@ export async function setInternalNotes(
     .bind(notes, id)
     .run();
   return (res.meta.changes ?? 0) > 0;
+}
+
+/** Delete explicit submissions and their local dependent rows, then R2 files. */
+export async function deleteSubmissions(
+  db: D1Database,
+  bucket: R2Bucket,
+  ids: string[],
+): Promise<{ deleted: number; filesFailed: number }> {
+  if (ids.length === 0) return { deleted: 0, filesFailed: 0 };
+  const placeholders = ids.map(() => "?").join(", ");
+  const images = await db
+    .prepare(`SELECT r2_key AS key FROM submission_images WHERE submission_id IN (${placeholders})`)
+    .bind(...ids)
+    .all<{ key: string }>();
+  const results = await db.batch([
+    db.prepare(`DELETE FROM activity_log WHERE submission_id IN (${placeholders})`).bind(...ids),
+    db.prepare(`DELETE FROM submissions WHERE id IN (${placeholders})`).bind(...ids),
+  ]);
+  // submission_images and invoices cascade from submissions. R2 is outside D1,
+  // so report any cleanup failures rather than claiming a complete delete.
+  let filesFailed = 0;
+  for (const image of images.results ?? []) {
+    try {
+      await bucket.delete(image.key);
+    } catch (err) {
+      filesFailed++;
+      console.error("Submission file cleanup failed", { key: image.key, err });
+    }
+  }
+  return { deleted: results[1].meta.changes ?? 0, filesFailed };
 }

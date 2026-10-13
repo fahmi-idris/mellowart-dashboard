@@ -16,6 +16,7 @@ export const TEMPLATE_KEYS = [
   "confirmation",
   "rejection",
   "waitlist",
+  "withdrawn",
 ] as const;
 
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
@@ -37,13 +38,18 @@ export const TEMPLATE_META: Record<
   },
   rejection: {
     label: "Rejection",
-    description: "Sent when a submission is marked rejected. Optional reason.",
-    trigger: "On status → rejected",
+    description: "Sent manually for a rejected submission. Optional reason.",
+    trigger: "Manual action · Rejected",
   },
   waitlist: {
     label: "Waitlist",
-    description: "Sent when a submission is waitlisted. Optional reason.",
-    trigger: "On status → waitlisted",
+    description: "Sent manually for a waitlisted submission. Optional reason.",
+    trigger: "Manual action · Waitlisted",
+  },
+  withdrawn: {
+    label: "Withdrawn",
+    description: "Sent manually after an application is marked withdrawn. Optional reason.",
+    trigger: "Manual action · Withdrawn",
   },
 };
 
@@ -53,6 +59,7 @@ export const TEMPLATE_META: Record<
 
 export type BlockType =
   | "hero"
+  | "image"
   | "heading"
   | "paragraph"
   | "list"
@@ -80,6 +87,13 @@ export interface HeroBlock extends BlockBase {
   subtext?: string;
   showReference?: boolean;
 }
+export interface ImageBlock extends BlockBase {
+  type: "image";
+  url: string;
+  alt: string;
+  linkUrl?: string;
+  width: "full" | "medium" | "small";
+}
 export interface HeadingBlock extends BlockBase {
   type: "heading";
   text: string;
@@ -101,6 +115,8 @@ export interface ButtonBlock extends BlockBase {
 }
 export interface SummaryBlock extends BlockBase {
   type: "summary";
+  backgroundColor?: string;
+  textColor?: string;
   label?: string;
   rows: { label: string; value: string }[];
 }
@@ -117,6 +133,7 @@ export interface SpacerBlock extends BlockBase {
 
 export type EmailBlock =
   | HeroBlock
+  | ImageBlock
   | HeadingBlock
   | ParagraphBlock
   | ListBlock
@@ -126,8 +143,28 @@ export type EmailBlock =
   | DividerBlock
   | SpacerBlock;
 
+export type BlockDropPosition = "before" | "after";
+
+/** Reorder one block relative to another without mutating the working copy. */
+export function reorderEmailBlocks(
+  blocks: EmailBlock[],
+  sourceId: string,
+  targetId: string,
+  position: BlockDropPosition,
+): EmailBlock[] {
+  if (sourceId === targetId) return blocks;
+  const source = blocks.find((block) => block.id === sourceId);
+  if (!source || !blocks.some((block) => block.id === targetId)) return blocks;
+
+  const next = blocks.filter((block) => block.id !== sourceId);
+  const targetIndex = next.findIndex((block) => block.id === targetId);
+  next.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, source);
+  return next;
+}
+
 export const BLOCK_LABELS: Record<BlockType, string> = {
   hero: "Hero banner",
+  image: "Image",
   heading: "Heading",
   paragraph: "Paragraph",
   list: "List",
@@ -147,6 +184,8 @@ export function newBlock(type: BlockType): EmailBlock {
   switch (type) {
     case "hero":
       return { id, type, tag: "", heading: "Heading", subtext: "", showReference: false };
+    case "image":
+      return { id, type, url: "", alt: "", linkUrl: "", width: "full" };
     case "heading":
       return { id, type, text: "Heading" };
     case "paragraph":
@@ -173,10 +212,16 @@ export function newBlock(type: BlockType): EmailBlock {
 export interface EmailBranding {
   fromName: string;
   logoUrl: string;
+  headerLogoWidth: number | null;
   brandColor: string; // dark brand / hero background
   accentColor: string; // pill / highlight
   buttonColor: string;
   headerBg: string;
+  bodyBg: string;
+  bodyTextColor: string;
+  heroTextColor: string; // empty = automatic contrast
+  summaryBg: string;
+  summaryTextColor: string;
   footerBg: string; // footer background (falls back to brandColor)
   footerLogoUrl: string; // footer logo — use a light/inverted variant (falls back to logoUrl)
   footerText: string;
@@ -185,16 +230,29 @@ export interface EmailBranding {
   instagramUrl: string;
   facebookUrl: string;
   tiktokUrl: string;
+  socialLinks: SocialLink[];
+}
+
+export interface SocialLink {
+  id: string;
+  label: string;
+  url: string;
 }
 
 export const DEFAULT_BRANDING: EmailBranding = {
   fromName: "Mellow Art",
   logoUrl:
     "https://cdn.prod.website-files.com/6a223b24e44ab35ad710d94d/6a223b24e44ab35ad710d9a3_image%2030.webp",
+  headerLogoWidth: null,
   brandColor: "#2C2422",
   accentColor: "#F2C4CE",
   buttonColor: "#2C2422",
   headerBg: "#FFFDF2",
+  bodyBg: "#F5F5F0",
+  bodyTextColor: "#2C2422",
+  heroTextColor: "",
+  summaryBg: "#FFFDF2",
+  summaryTextColor: "#2C2422",
   footerBg: "#2C2422",
   footerLogoUrl:
     "https://cdn.prod.website-files.com/6a223b24e44ab35ad710d94d/6a223b24e44ab35ad710d9a3_image%2030.webp",
@@ -205,7 +263,112 @@ export const DEFAULT_BRANDING: EmailBranding = {
   instagramUrl: "https://www.instagram.com/mellowartmarket/",
   facebookUrl: "https://www.facebook.com/mellowartmarket",
   tiktokUrl: "https://www.tiktok.com/@mellowartmarket",
+  socialLinks: [
+    { id: "website", label: "Website", url: "https://www.mellowart.com.au" },
+    { id: "instagram", label: "Instagram", url: "https://www.instagram.com/mellowartmarket/" },
+    { id: "facebook", label: "Facebook", url: "https://www.facebook.com/mellowartmarket" },
+    { id: "tiktok", label: "TikTok", url: "https://www.tiktok.com/@mellowartmarket" },
+  ],
 };
+
+export const BRAND_COLOR_KEYS = [
+  "brandColor",
+  "accentColor",
+  "buttonColor",
+  "headerBg",
+  "footerBg",
+  "bodyBg",
+  "bodyTextColor",
+  "heroTextColor",
+  "summaryBg",
+  "summaryTextColor",
+] as const;
+
+/** HTML color inputs require six digits; also accept shorthand in the text field. */
+export function normalizeHexColor(value: string): string | null {
+  const hex = value.trim();
+  if (/^#[\da-f]{6}$/i.test(hex)) return hex.toUpperCase();
+  if (/^#[\da-f]{3}$/i.test(hex))
+    return (
+      "#" +
+      [...hex.slice(1)]
+        .map((c) => c + c)
+        .join("")
+        .toUpperCase()
+    );
+  return null;
+}
+
+export function summaryColorError(blocks: EmailBlock[]): string | null {
+  for (const block of blocks) {
+    if (block.type !== "summary") continue;
+    for (const key of ["backgroundColor", "textColor"] as const) {
+      if (
+        block[key] !== undefined &&
+        (typeof block[key] !== "string" || !normalizeHexColor(block[key]))
+      ) {
+        return `Invalid summary ${key === "backgroundColor" ? "background" : "text"} color. Use #RGB or #RRGGBB.`;
+      }
+    }
+  }
+  return null;
+}
+
+/** Choose the higher-contrast foreground for a configurable background. */
+export function emailForeground(background: string): string {
+  const hex = normalizeHexColor(background) ?? "#2C2422";
+  const channels = [1, 3, 5].map((offset) => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  });
+  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  return (luminance + 0.05) / 0.05 > 1.05 / (luminance + 0.05) ? "#000000" : "#FFFFFF";
+}
+
+/** Populate new branding fields when reading older global/event settings. */
+export function normalizeEmailBranding(raw: Partial<EmailBranding>): EmailBranding {
+  const branding = { ...DEFAULT_BRANDING, ...raw };
+  // Old rows may have null fields; never pass invalid strings into HTML/CSS.
+  for (const key of Object.keys(DEFAULT_BRANDING) as (keyof EmailBranding)[]) {
+    if (typeof DEFAULT_BRANDING[key] === "string" && typeof branding[key] !== "string") {
+      Object.assign(branding, { [key]: DEFAULT_BRANDING[key] });
+    }
+  }
+  for (const key of BRAND_COLOR_KEYS) {
+    branding[key] = normalizeHexColor(branding[key]) ?? DEFAULT_BRANDING[key];
+  }
+  return {
+    ...branding,
+    headerLogoWidth:
+      typeof raw.headerLogoWidth === "number" && Number.isFinite(raw.headerLogoWidth)
+        ? Math.max(80, Math.min(320, raw.headerLogoWidth))
+        : null,
+    socialLinks: Array.isArray(raw.socialLinks)
+      ? raw.socialLinks
+          .filter(
+            (link): link is SocialLink =>
+              link !== null &&
+              typeof link === "object" &&
+              typeof link.label === "string" &&
+              typeof link.url === "string",
+          )
+          .map((link, index) => ({
+            id: typeof link.id === "string" && link.id ? link.id : `social-${index}`,
+            label: link.label,
+            url: link.url,
+          }))
+      : (
+          [
+            ["website", "Website", branding.websiteUrl],
+            ["instagram", "Instagram", branding.instagramUrl],
+            ["facebook", "Facebook", branding.facebookUrl],
+            ["tiktok", "TikTok", branding.tiktokUrl],
+          ] as const
+        )
+          .filter(([, , url]) => url)
+          .map(([id, label, url]) => ({ id, label, url })),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Merge tags — per template, with sample values used for preview / test sends.
@@ -218,10 +381,10 @@ export interface MergeTag {
 }
 
 const COMMON_TAGS: MergeTag[] = [
-  { tag: "name", label: "Full name", sample: "Ada Lovelace" },
-  { tag: "firstName", label: "First name", sample: "Ada" },
-  { tag: "lastName", label: "Last name", sample: "Lovelace" },
-  { tag: "email", label: "Email", sample: "ada@example.com" },
+  { tag: "name", label: "Full name", sample: "John Doe" },
+  { tag: "firstName", label: "First name", sample: "John" },
+  { tag: "lastName", label: "Last name", sample: "Doe" },
+  { tag: "email", label: "Email", sample: "john@example.com" },
   { tag: "reference", label: "Submission reference", sample: "ART-9F3AB2C1" },
 ];
 
@@ -233,6 +396,7 @@ export const ALL_MERGE_TAGS: MergeTag[] = [
   ...COMMON_TAGS,
   { tag: "eventName", label: "Event name", sample: "Mellow Art Market — Spring" },
   { tag: "stallType", label: "Stall type (1st preference)", sample: "Standard – Debut" },
+  { tag: "offeredStall", label: "Offered / assigned stall", sample: "Standard – Debut" },
   { tag: "secondStallType", label: "Stall type (2nd preference)", sample: "Mini" },
   { tag: "invoiceUrl", label: "Invoice / pay link", sample: "https://pay.example.com/inv/123" },
   { tag: "amount", label: "Amount (formatted)", sample: "AUD 220.00" },
@@ -240,7 +404,11 @@ export const ALL_MERGE_TAGS: MergeTag[] = [
   { tag: "bankAccountName", label: "Bank account name", sample: "Mellow Art Market" },
   { tag: "bankBsb", label: "Bank BSB", sample: "063-000" },
   { tag: "bankAccountNumber", label: "Bank account number", sample: "1234 5678" },
-  { tag: "confirmationFormUrl", label: "Confirmation form URL", sample: "https://forms.example.com/paid" },
+  {
+    tag: "confirmationFormUrl",
+    label: "Confirmation form URL",
+    sample: "https://forms.example.com/paid",
+  },
   { tag: "contactEmail", label: "Contact email", sample: "mellowartmarket@gmail.com" },
   { tag: "brandName", label: "Brand name", sample: "Analytical Engines" },
   { tag: "primaryCategory", label: "Primary category", sample: "Ceramics" },
@@ -253,6 +421,7 @@ export const MERGE_TAGS: Record<TemplateKey, MergeTag[]> = {
   confirmation: ALL_MERGE_TAGS,
   rejection: ALL_MERGE_TAGS,
   waitlist: ALL_MERGE_TAGS,
+  withdrawn: ALL_MERGE_TAGS,
 };
 
 // ---------------------------------------------------------------------------
@@ -278,15 +447,13 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
         type: "hero",
         tag: "Application Approved",
         heading: "Congratulations, {{firstName}}! 🎨",
-        subtext:
-          "Your application has been approved.\nComplete your payment to secure your spot.",
+        subtext: "Your application has been approved.\nComplete your payment to secure your spot.",
         showReference: true,
       }),
       b({
         id: "greeting",
         type: "paragraph",
-        text:
-          "Hi {{firstName}},\n\nWe're so excited to have you join us at **{{eventName}}**! 🌿 Your spot is almost secured — just one step left. Please complete your payment by **{{dueDate}}** to confirm your place at the event.",
+        text: "Hi {{firstName}},\n\nWe're so excited to have you join us at **{{eventName}}**! 🌿 Your spot is almost secured — just one step left. Please complete your payment by **{{dueDate}}** to confirm your place at the event.",
       }),
       b({
         id: "summary",
@@ -294,6 +461,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
         label: "Invoice Summary",
         rows: [
           { label: "Event", value: "{{eventName}}" },
+          { label: "Offered Stall", value: "{{offeredStall}}" },
           { label: "Submission ID", value: "{{reference}}" },
           { label: "Payment Due", value: "{{dueDate}}" },
           { label: "Total Amount", value: "{{amount}}" },
@@ -312,8 +480,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "closing",
         type: "paragraph",
-        text:
-          "Once your payment is received and confirmed, we'll send you a follow-up email with all the event details you need. 🌿\n\nIf you have any questions, don't hesitate to reach out — we're always happy to help!\n\nWarm regards,\nThe Mellow Art Team",
+        text: "Once your payment is received and confirmed, we'll send you a follow-up email with all the event details you need. 🌿\n\nIf you have any questions, don't hesitate to reach out — we're always happy to help!\n\nWarm regards,\nThe Mellow Art Team",
       }),
     ],
   },
@@ -325,8 +492,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "intro",
         type: "paragraph",
-        text:
-          "Thanks for applying to Mellow Art Market! We've received your application for **{{brandName}}** and our team will be reviewing it shortly.",
+        text: "Thanks for applying to Mellow Art Market! We've received your application for **{{brandName}}** and our team will be reviewing it shortly.",
       }),
       b({
         id: "steps",
@@ -352,8 +518,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "outro",
         type: "paragraph",
-        text:
-          "If you need to update any part of your application, reply to this email and let us know — please don't submit a duplicate application.\n\nWarmly,\nThe Mellow Art Team",
+        text: "If you need to update any part of your application, reply to this email and let us know — please don't submit a duplicate application.\n\nWarmly,\nThe Mellow Art Team",
       }),
     ],
   },
@@ -365,8 +530,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "body",
         type: "paragraph",
-        text:
-          "Thank you for your submission (**{{reference}}**). After review, it has **not been accepted** at this time.",
+        text: "Thank you for your submission (**{{reference}}**). After review, it has **not been accepted** at this time.",
       }),
       b({
         id: "reason",
@@ -385,8 +549,26 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateContent> = {
       b({
         id: "body",
         type: "paragraph",
-        text:
-          "Thank you for your submission (**{{reference}}**). After review, you've been placed on our **waitlist**. If a spot opens up, we'll be in touch.",
+        text: "Thank you for your submission (**{{reference}}**). After review, you've been placed on our **waitlist**. If a spot opens up, we'll be in touch.",
+      }),
+      b({
+        id: "reason",
+        type: "summary",
+        label: "Reason",
+        rows: [{ label: "", value: "{{reason}}" }],
+        hideIfEmpty: "{{reason}}",
+      }),
+    ],
+  },
+  withdrawn: {
+    subject: "Your Mellow Art application {{reference}} has been withdrawn",
+    preheader: "Confirmation that your application is withdrawn.",
+    blocks: [
+      b({ id: "greeting", type: "paragraph", text: "Hi {{firstName}}," }),
+      b({
+        id: "body",
+        type: "paragraph",
+        text: "Your application (**{{reference}}**) has been marked as withdrawn. It will no longer be considered for this event. If this was a mistake, please reply to this email.",
       }),
       b({
         id: "reason",

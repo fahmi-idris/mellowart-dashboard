@@ -3,14 +3,20 @@ import { env } from "cloudflare:workers";
 import type { Route } from "./+types/api.inquiries";
 import { requireAdmin } from "~/lib/auth.server";
 import { rowsToCsv } from "~/lib/csv";
+import { getEvent } from "~/lib/events.server";
 import { parseListQuery } from "~/lib/data-table";
 import { d1List, type D1ListConfig } from "~/lib/d1-pagination.server";
-import {
-  getSubmissionsForExport,
-  type SubmissionExportRow,
-} from "~/lib/submissions.server";
+import { getSubmissionsForExport, type SubmissionExportRow } from "~/lib/submissions.server";
+import { zipStream, type ZipEntry } from "~/lib/zip.server";
+import { nameBackupDocuments, type BackupDocument } from "~/lib/inquiry-backup";
 
 const yesNo = (v: number) => (v ? "yes" : "no");
+const escapeHtml = (value: unknown) =>
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char,
+  );
 
 // CSV export columns, in order. Every row includes every column (blank when
 // unset) so the export shape is stable regardless of which fields have data.
@@ -43,6 +49,8 @@ const EXPORT_COLUMNS: {
   { header: "Status", get: (r) => r.status },
   { header: "Reject reason", get: (r) => r.rejectReason },
   { header: "Waitlist reason", get: (r) => r.waitlistReason },
+  { header: "Withdrawal reason", get: (r) => r.withdrawnReason },
+  { header: "Decision email sent at", get: (r) => r.decisionEmailSentAt },
   { header: "Decided by", get: (r) => r.decidedBy },
   { header: "Decided at", get: (r) => r.decidedAt },
   { header: "Stall assigned", get: (r) => r.stallTier },
@@ -88,12 +96,43 @@ const LIST_CONFIG: D1ListConfig = {
     "id, first_name AS firstName, last_name AS lastName, " +
     "(first_name || ' ' || last_name) AS name, email, brand_name AS brandName, " +
     "primary_category AS primaryCategory, secondary_category AS secondaryCategory, " +
-    "sharing_stall AS sharingStall, " +
+    "product_description AS productDescription, " +
+    "sharing_stall AS sharingStall, has_insurance AS hasInsurance, " +
+    "applied_before AS appliedBefore, instagram, decided_at AS decidedAt, " +
     "event_id AS eventId, status, reject_reason AS rejectReason, " +
+    "withdrawn_reason AS withdrawnReason, decision_email_sent_at AS decisionEmailSentAt, " +
     "stall_option_id AS stallOptionId, payment_status AS paymentStatus, " +
     "invoice_url AS invoiceUrl, internal_notes AS internalNotes, " +
     "archived_at AS archivedAt, created_at AS submittedAt",
-  searchColumns: ["first_name", "last_name", "email"],
+  searchColumns: [
+    "first_name",
+    "last_name",
+    "(first_name || ' ' || last_name)",
+    "email",
+    "brand_name",
+    "id",
+    "primary_category",
+    "secondary_category",
+    "internal_notes",
+  ],
+  searchFieldColumns: {
+    name: ["first_name", "last_name", "(first_name || ' ' || last_name)"],
+    brand: ["brand_name"],
+    email: ["email"],
+    reference: ["id"],
+    primaryCategory: ["primary_category"],
+    secondaryCategory: ["secondary_category"],
+    instagram: ["instagram"],
+    website: ["website"],
+    notes: ["internal_notes"],
+    appliedBefore: ["applied_before"],
+    secondArtist: [
+      "second_artist_first_name",
+      "second_artist_last_name",
+      "second_artist_email",
+      "second_artist_brand_name",
+    ],
+  },
   // Filter keys sent by the UI map 1:1 to these columns.
   filterColumns: ["status", "payment_status", "event_id", "stall_option_id"],
   sortColumns: ["last_name", "status", "payment_status", "created_at"],
@@ -123,6 +162,87 @@ export async function loader({ request }: Route.LoaderArgs) {
         : undefined;
   const config: D1ListConfig = { ...LIST_CONFIG, extraWhere: archiveWhere };
 
+  // All-event backups require explicit scope; otherwise require one event.
+  if (url.searchParams.get("format") === "backup") {
+    const allEvents = url.searchParams.get("scope") === "all";
+    const eventId = query.filters?.event_id;
+    if (!allEvents && !eventId)
+      return Response.json({ error: "Choose an event to back up." }, { status: 400 });
+    const event = !allEvents && eventId ? await getEvent(env.DB, eventId) : null;
+    if (!allEvents && !event) return Response.json({ error: "Event not found." }, { status: 404 });
+    const matching = await d1List(
+      env.DB,
+      allEvents
+        ? { page: 1, pageSize: 1 }
+        : { page: 1, pageSize: 1, filters: { event_id: eventId! } },
+      LIST_CONFIG,
+    );
+    if (matching.total > 10_000) {
+      return Response.json(
+        { error: "Backup exceeds the supported record count." },
+        { status: 413 },
+      );
+    }
+    const rows = await getSubmissionsForExport(env.DB, allEvents ? {} : { eventId });
+    const imageRows: BackupDocument[] = [];
+    // Bound batches avoid exceeding the D1 query parameter limit. Only selected
+    // submissions' documents may enter the ZIP (including metadata/HTML links).
+    for (let offset = 0; offset < rows.length; offset += 90) {
+      const ids = rows.slice(offset, offset + 90).map((row) => row.id);
+      const images = await env.DB.prepare(
+        `SELECT submission_id AS submissionId, r2_key AS key, kind, size FROM submission_images WHERE submission_id IN (${ids.map(() => "?").join(",")}) ORDER BY submission_id, sort_order, id`,
+      )
+        .bind(...ids)
+        .all<BackupDocument>();
+      imageRows.push(...(images.results ?? []));
+    }
+    const imagePaths = new Map<string, string[]>();
+    const documents = nameBackupDocuments(rows, imageRows);
+    for (const document of documents) {
+      imagePaths.set(document.submissionId, [
+        ...(imagePaths.get(document.submissionId) ?? []),
+        document.name,
+      ]);
+    }
+    const estimatedBytes = imageRows.reduce((n, item) => n + Number(item.size ?? 0), 0);
+    if (estimatedBytes >= 3_500_000_000 || imageRows.length + 3 > 65535) {
+      return Response.json(
+        { error: "Backup is too large for a single ZIP download." },
+        { status: 413 },
+      );
+    }
+    const csv = rowsToCsv(
+      EXPORT_COLUMNS.map((c) => c.header),
+      rows.map((r) => EXPORT_COLUMNS.map((c) => c.get(r))),
+    );
+    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Mellow inquiries backup</title><style>body{font:14px system-ui;margin:2rem}table{border-collapse:collapse}th,td{border:1px solid #ddd;padding:.5rem;vertical-align:top}th{background:#eee}td{white-space:pre-wrap}</style><h1>Inquiries backup</h1><p>${rows.length} submissions</p><table><thead><tr>${EXPORT_COLUMNS.map((c) => `<th>${escapeHtml(c.header)}</th>`).join("")}<th>Documents</th></tr></thead><tbody>${rows.map((row) => `<tr>${EXPORT_COLUMNS.map((c) => `<td>${escapeHtml(c.get(row))}</td>`).join("")}<td>${(imagePaths.get(row.id) ?? []).map((path) => `<a href="${escapeHtml(path.split("/").map(encodeURIComponent).join("/"))}">${escapeHtml(path.split("/").at(-1))}</a>`).join("<br>")}</td></tr>`).join("")}</tbody></table></html>`;
+    async function* entries(): AsyncGenerator<ZipEntry> {
+      yield { name: "inquiries.csv", body: new TextEncoder().encode(`\ufeff${csv}`) };
+      yield { name: "inquiries.html", body: new TextEncoder().encode(html) };
+      for (const image of documents) {
+        const name = image.name;
+        const object = await env.BUCKET.get(image.key);
+        if (object?.body) yield { name, body: object.body };
+        else
+          yield {
+            name: `${name}.missing.txt`,
+            body: new TextEncoder().encode(`File missing from R2: ${image.key}\n`),
+          };
+      }
+    }
+    const date = new Date().toISOString().slice(0, 10);
+    const eventFilename = event
+      ? (event.slug || event.id).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 100)
+      : "all-events";
+    return new Response(zipStream(entries()), {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="inquiries-backup-${eventFilename}-${date}.zip"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   // Copy-emails mode: every matching email for the current search/filters,
   // ignoring pagination. Returns { emails: string[] }.
   if (url.searchParams.get("emails") === "1") {
@@ -140,6 +260,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (url.searchParams.get("format") === "csv") {
     const rows = await getSubmissionsForExport(env.DB, {
       search: query.search,
+      searches: query.searches,
       status: query.filters?.status,
       paymentStatus: query.filters?.payment_status,
       eventId: query.filters?.event_id,

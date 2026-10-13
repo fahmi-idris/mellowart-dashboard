@@ -14,10 +14,48 @@ export interface EventSummary {
 }
 
 export interface EventWithCounts extends EventSummary {
+  webflowSyncStatus: "pending" | "synced" | "failed" | null;
+  webflowSyncError: string | null;
+  webflowSyncedAt: string | null;
+  summary: string | null;
+  description: string | null;
+  image: string | null;
+  references: EventReference[];
   /** Total applications for the event. */
   applicants: number;
   /** Applications still in `pending` ("X awaiting review"). */
   awaitingReview: number;
+}
+
+export const EVENT_REFERENCE_KINDS = ["category", "theme", "location", "month"] as const;
+export type EventReferenceKind = (typeof EVENT_REFERENCE_KINDS)[number];
+export interface EventReference {
+  id: string;
+  kind: EventReferenceKind;
+  name: string;
+}
+
+export type EventPhase = "upcoming" | "ongoing" | "inactive" | "unscheduled";
+
+/** Date-only event lifecycle. End dates remain active through their final day. */
+export function getEventPhase(
+  event: Partial<Pick<EventSummary, "startsAt" | "endsAt">>,
+  today = new Date().toISOString().slice(0, 10),
+): EventPhase {
+  const start = event.startsAt?.slice(0, 10);
+  const end = event.endsAt?.slice(0, 10);
+  if (end && end < today) return "inactive";
+  if (start && start > today) return "upcoming";
+  if (!start && !end) return "unscheduled";
+  return "ongoing";
+}
+
+/** Upcoming, ongoing, and undated events remain available for templates. */
+export function isEventAvailableForTemplates(
+  event: Partial<Pick<EventSummary, "startsAt" | "endsAt">>,
+  today = new Date().toISOString().slice(0, 10),
+): boolean {
+  return getEventPhase(event, today) !== "inactive";
 }
 
 export interface StallOption {

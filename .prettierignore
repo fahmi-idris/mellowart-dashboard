@@ -1,0 +1,8 @@
+node_modules/
+build/
+.react-router/
+.wrangler/
+.dev.vars*
+worker-configuration.d.ts
+bun.lock
+public/

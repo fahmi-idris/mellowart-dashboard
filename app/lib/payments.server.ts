@@ -13,9 +13,10 @@ interface InvoiceLookupRow {
 
 /**
  * Set the application decision. Reversible at any time (pending / accepted /
- * waitlisted / rejected) — admins can always override. The optional `reason`
+ * waitlisted / rejected / withdrawn) — admins can always override. The optional `reason`
  * is stored against whichever decision it belongs to (`reject_reason` for
- * rejected, `waitlist_reason` for waitlisted) and both are cleared otherwise.
+ * rejected, `waitlist_reason` for waitlisted, `withdrawn_reason` for withdrawn).
+ * A new decision clears the previous decision-email sent state.
  */
 export async function setApplicationStatus(
   db: D1Database,
@@ -30,14 +31,67 @@ export async function setApplicationStatus(
          SET status = ?,
              reject_reason = CASE WHEN ? = 'rejected' THEN ? ELSE NULL END,
              waitlist_reason = CASE WHEN ? = 'waitlisted' THEN ? ELSE NULL END,
+             withdrawn_reason = CASE WHEN ? = 'withdrawn' THEN ? ELSE NULL END,
+             decision_email_sent_at = NULL,
              decided_by = ?,
              decided_at = datetime('now'),
              updated_at = datetime('now')
        WHERE id = ?`,
     )
-    .bind(status, status, reason ?? null, status, reason ?? null, decidedBy, id)
+    .bind(
+      status,
+      status,
+      reason ?? null,
+      status,
+      reason ?? null,
+      status,
+      reason ?? null,
+      decidedBy,
+      id,
+    )
     .run();
   return (res.meta.changes ?? 0) > 0;
+}
+
+/** Apply one decision to a bounded, explicit selection in one D1 batch. */
+export async function setApplicationStatuses(
+  db: D1Database,
+  ids: string[],
+  status: ApplicationStatus,
+  decidedBy: string,
+): Promise<number> {
+  const statements = ids.map((id) =>
+    db
+      .prepare(
+        `UPDATE submissions
+          SET status = ?, reject_reason = NULL, waitlist_reason = NULL,
+              withdrawn_reason = NULL, decision_email_sent_at = NULL,
+              decided_by = ?, decided_at = datetime('now'),
+              updated_at = datetime('now')
+        WHERE id = ?`,
+      )
+      .bind(status, decidedBy, id),
+  );
+  const results = await db.batch(statements);
+  return results.reduce((count, result) => count + (result.meta.changes ?? 0), 0);
+}
+
+/** Mark a Gmail-accepted decision email for the current status only. */
+export async function markDecisionEmailSent(
+  db: D1Database,
+  id: string,
+  status: ApplicationStatus,
+  sentAt: string,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE submissions
+          SET decision_email_sent_at = ?, updated_at = datetime('now')
+        WHERE id = ? AND status = ? AND decision_email_sent_at IS NULL`,
+    )
+    .bind(sentAt, id, status)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 /**
@@ -80,10 +134,7 @@ export async function assignStall(
  * machine, triggered by the admin's "Send Xero invoice" action. Guarding on
  * `stall_option_id IS NOT NULL` ensures the invoice always has a price.
  */
-export async function startInvoicing(
-  db: D1Database,
-  id: string,
-): Promise<boolean> {
+export async function startInvoicing(db: D1Database, id: string): Promise<boolean> {
   const res = await db
     .prepare(
       `UPDATE submissions
@@ -104,10 +155,7 @@ export async function startInvoicing(
  * retry "Send invoice". Guarded on `xero_invoice_id IS NULL` so a row that did
  * get an invoice attached is never reset.
  */
-export async function cancelInvoicing(
-  db: D1Database,
-  id: string,
-): Promise<boolean> {
+export async function cancelInvoicing(db: D1Database, id: string): Promise<boolean> {
   const res = await db
     .prepare(
       `UPDATE submissions
@@ -151,9 +199,7 @@ export async function findByInvoiceId(
   xeroInvoiceId: string,
 ): Promise<InvoiceLookupRow | null> {
   return db
-    .prepare(
-      "SELECT id, payment_status FROM submissions WHERE xero_invoice_id = ?",
-    )
+    .prepare("SELECT id, payment_status FROM submissions WHERE xero_invoice_id = ?")
     .bind(xeroInvoiceId)
     .first<InvoiceLookupRow>();
 }

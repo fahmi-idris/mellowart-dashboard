@@ -13,11 +13,18 @@ export interface SortState {
   dir: SortDir;
 }
 
+export interface SearchCriterion {
+  field: string;
+  value: string;
+}
+
 /** Query params a list endpoint accepts (sent by BaseTable). */
 export interface ListQuery {
   page: number; // 1-based
   pageSize: number;
   search?: string;
+  /** Field-specific criteria. Every populated criterion is combined with OR. */
+  searches?: SearchCriterion[];
   sort?: SortState | null;
   /** field -> selected value (exact match). Empty/absent = no filter. */
   filters?: Record<string, string>;
@@ -46,6 +53,13 @@ export function listQueryToSearchParams(q: ListQuery): URLSearchParams {
   sp.set("page", String(q.page));
   sp.set("pageSize", String(q.pageSize));
   if (q.search) sp.set("search", q.search);
+  if (q.searches) {
+    for (const criterion of q.searches) {
+      if (criterion.field && criterion.value) {
+        sp.append(`search.${criterion.field}`, criterion.value);
+      }
+    }
+  }
   if (q.sort) {
     sp.set("sort", q.sort.field);
     sp.set("dir", q.sort.dir);
@@ -72,13 +86,16 @@ export function parseListQuery(sp: URLSearchParams): ListQuery {
     : null;
 
   const filters: Record<string, string> = {};
+  const searches: SearchCriterion[] = [];
   for (const [key, value] of sp.entries()) {
     if (key.startsWith("filter.") && value) {
       filters[key.slice("filter.".length)] = value;
+    } else if (key.startsWith("search.") && value) {
+      searches.push({ field: key.slice("search.".length), value });
     }
   }
 
-  return { page, pageSize, search, sort, filters };
+  return { page, pageSize, search, searches, sort, filters };
 }
 
 /** Build a Paginated envelope from a slice + total. */
@@ -108,7 +125,10 @@ export function paginate<T>(
 export function clientPaginate<T extends Record<string, unknown>>(
   rows: T[],
   q: ListQuery,
-  opts: { searchFields?: (keyof T)[] } = {},
+  opts: {
+    searchFields?: (keyof T)[];
+    namedSearchFields?: Record<string, (keyof T)[]>;
+  } = {},
 ): Paginated<T> {
   let out = [...rows];
 
@@ -120,6 +140,22 @@ export function clientPaginate<T extends Record<string, unknown>>(
           .toLowerCase()
           .includes(term),
       ),
+    );
+  }
+
+  const namedSearches = (q.searches ?? []).filter(
+    ({ field, value }) => value && opts.namedSearchFields?.[field]?.length,
+  );
+  if (namedSearches.length) {
+    out = out.filter((row) =>
+      namedSearches.some(({ field, value }) => {
+        const normalized = value.toLowerCase();
+        return opts.namedSearchFields![field].some((column) =>
+          String(row[column] ?? "")
+            .toLowerCase()
+            .includes(normalized),
+        );
+      }),
     );
   }
 

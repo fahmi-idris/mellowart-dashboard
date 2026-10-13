@@ -6,6 +6,7 @@ export interface InquirySummary {
   accepted: number;
   waitlisted: number;
   rejected: number;
+  withdrawn: number;
 }
 
 export interface RecentSubmission {
@@ -40,6 +41,7 @@ export async function getInquirySummary(
     accepted: 0,
     waitlisted: 0,
     rejected: 0,
+    withdrawn: 0,
   };
 
   for (const row of res.results ?? []) {
@@ -48,6 +50,7 @@ export async function getInquirySummary(
     else if (row.status === "accepted") summary.accepted = count;
     else if (row.status === "waitlisted") summary.waitlisted = count;
     else if (row.status === "rejected") summary.rejected = count;
+    else if (row.status === "withdrawn") summary.withdrawn = count;
     summary.total += count;
   }
 
@@ -104,6 +107,7 @@ const BREAKDOWN_ORDER: { key: string; label: string }[] = [
   { key: "overdue", label: "Overdue" },
   { key: "voided", label: "Invoice voided" },
   { key: "rejected", label: "Rejected" },
+  { key: "withdrawn", label: "Withdrawn" },
 ];
 
 /** Rich dashboard payload: counts, deltas, sparklines, trend, and breakdown. */
@@ -149,8 +153,7 @@ export async function getDashboardData(
     const prev = arr.slice(0, 30).reduce((a, b) => a + b, 0);
     const cur = arr.slice(30).reduce((a, b) => a + b, 0);
     sparks[m] = arr.slice(30);
-    deltas[m] =
-      prev === 0 ? (cur === 0 ? 0 : null) : Math.round(((cur - prev) / prev) * 100);
+    deltas[m] = prev === 0 ? (cur === 0 ? 0 : null) : Math.round(((cur - prev) / prev) * 100);
   }
 
   const trend = dayKeys(30).map((date, i) => ({
@@ -167,11 +170,11 @@ export async function getDashboardData(
   );
   const br = await (eventId ? brStmt.bind(eventId) : brStmt).all<BreakdownRow>();
   const buckets = new Map<string, number>();
-  const add = (k: string, c: number) =>
-    buckets.set(k, (buckets.get(k) ?? 0) + c);
+  const add = (k: string, c: number) => buckets.set(k, (buckets.get(k) ?? 0) + c);
   for (const row of br.results ?? []) {
     const c = Number(row.c);
     if (row.status === "rejected") add("rejected", c);
+    else if (row.status === "withdrawn") add("withdrawn", c);
     else if (row.status === "pending") add("pending", c);
     else if (row.status === "waitlisted") add("waitlisted", c);
     else if (row.status === "accepted") {
